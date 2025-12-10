@@ -13,6 +13,7 @@ $orgCode   = $_SESSION['user']['org_code'];
 $canInsert = $_SESSION['user']['can_insert'] ?? 0;
 $canEdit   = $_SESSION['user']['can_edit'] ?? 0;
 $canDelete = $_SESSION['user']['can_delete'] ?? 0;
+$canApprove = $_SESSION['user']['can_approve'] ?? 0;
 
 function gen_id($prefix = '') {
     $ms = (int)floor(microtime(true) * 1000) % 1000;
@@ -60,105 +61,125 @@ if (isset($_GET['mst_id'])) {
     exit();
 }
 
-// ---- Fetch suppliers & distributors for selects ----
-$stmtSup = $pdo->prepare("SELECT supplier_id, supplier_name FROM supplier WHERE br_code = :br ORDER BY supplier_name");
-$stmtSup->execute(['br' => $brCode]);
-$suppliers = $stmtSup->fetchAll(PDO::FETCH_ASSOC);
-
-$stmtDist = $pdo->prepare("SELECT DISTRIBUTOR_CODE, DISTRIBUTOR_NAME FROM distributor WHERE ORG_CODE = :org AND DELETE_DATE IS NULL ORDER BY DISTRIBUTOR_NAME");
-$stmtDist->execute(['org' => $orgCode]);
-$distributors = $stmtDist->fetchAll(PDO::FETCH_ASSOC);
-
 // ---- POST: Handle Save/Update stock entry ----
 $message = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action']==='save' && $canInsert) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
-    $details     = json_decode($_POST['details_json'], true);
-    $discount    = floatval($_POST['total_discount'] ?? 0);
-    $payment     = trim($_POST['payment'] ?? '');
-    $voucherRef  = trim($_POST['voucher_ref'] ?? '');
-    $mstIdEdit   = trim($_POST['mst_id'] ?? '');
+    if ($_POST['action']==='save' && $canInsert) {
+        $details     = json_decode($_POST['details_json'], true);
+        $discount    = floatval($_POST['total_discount'] ?? 0);
+        $payment     = trim($_POST['payment'] ?? '');
+        $voucherRef  = trim($_POST['voucher_ref'] ?? '');
+        $mstIdEdit   = trim($_POST['mst_id'] ?? '');
 
-    // Preserve POST values for redisplay
-    $oldVoucher  = htmlspecialchars($voucherRef);
-    $oldDiscount = htmlspecialchars($discount);
-    $oldPayment  = htmlspecialchars($payment);
+        $oldVoucher  = htmlspecialchars($voucherRef);
+        $oldDiscount = htmlspecialchars($discount);
+        $oldPayment  = htmlspecialchars($payment);
 
-    // --- Validation ---
-    if (!$voucherRef) {
-        $message = "<div class='alert alert-danger'>Please enter Purchase Voucher Number.</div>";
-    } elseif (!is_array($details) || count($details) === 0) {
-        $message = "<div class='alert alert-danger'>No items to save.</div>";
-    } elseif ($payment === '') {
-        $message = "<div class='alert alert-danger'>Payment cannot be empty.</div>";
-    } else {
+        if (!$voucherRef) {
+            $message = "<div class='alert alert-danger'>Please enter Purchase Voucher Number.</div>";
+        } elseif (!is_array($details) || count($details) === 0) {
+            $message = "<div class='alert alert-danger'>No items to save.</div>";
+        } elseif ($payment === '') {
+            $message = "<div class='alert alert-danger'>Payment cannot be empty.</div>";
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                // --- Master Record ---
+                if ($mstIdEdit) {
+                    $mstId = $mstIdEdit;
+                    $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")
+                        ->execute(['mst'=>$mstId,'br'=>$brCode]);
+                } else {
+                    $mstId = gen_id($brCode.'-');
+                    $pdo->prepare("INSERT INTO stock_mst (stock_mst_id, stock_voucher_ref, stock_entry_date, org_code, br_code, sub_total, discount, total_amount, payment, due_amount, entry_user, entry_date) 
+                        VALUES (:mst_id,:ref,NOW(),:org,:br,0,0,0,0,0,:user,NOW())")
+                        ->execute([
+                            'mst_id'=>$mstId,'ref'=>$voucherRef,'org'=>$orgCode,'br'=>$brCode,'user'=>$userId
+                        ]);
+                }
+
+                // --- Detail Records ---
+                $subTotal = 0;
+                $stmtDtl = $pdo->prepare("INSERT INTO stock_dtl (stock_dtl_id, stock_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, sub_total, original_price, commission_pct, commission_type, org_code, br_code, distributor_code, entry_user, entry_date)
+                    VALUES (:dtl_id,:mst_id,:model,:cat,:sup,:price,:qty,:total,:sub_total,:orig_price,:cpct,:ctype,:org,:br,:dist,:user,NOW())");
+
+                foreach($details as $d){
+                    $rowSubTotal   = $d['price'] * $d['quantity'];
+                    $commissionAmt = ($d['commission_type']=='PCT') ? ($rowSubTotal * $d['commission_value']/100) : $d['commission_value'];
+                    $finalTotal    = $rowSubTotal - $commissionAmt;
+                    $dtlId         = gen_id($brCode.'-DTL-');
+
+                    $stmtDtl->execute([
+                        'dtl_id'=>$dtlId,
+                        'mst_id'=>$mstId,
+                        'model'=>$d['model_id'],
+                        'cat'=>$d['product_category_id'],
+                        'sup'=>$d['supplier_id'],
+                        'price'=>$d['price'],
+                        'qty'=>$d['quantity'],
+                        'total'=>$finalTotal,
+                        'sub_total'=>$rowSubTotal,
+                        'orig_price'=>$d['price'],
+                        'cpct'=>$d['commission_value'],
+                        'ctype'=>$d['commission_type'],
+                        'org'=>$orgCode,
+                        'br'=>$brCode,
+                        'dist'=>$d['distributor_code'],
+                        'user'=>$userId
+                    ]);
+                    $subTotal += $finalTotal;
+                }
+
+                // --- Update Master totals ---
+                $totalAmount = $subTotal - $discount;
+                $dueAmount   = $totalAmount - $payment;
+
+                $pdo->prepare("UPDATE stock_mst SET sub_total=:sub, discount=:disc, total_amount=:total, payment=:pay, due_amount=:due WHERE stock_mst_id=:mst_id")
+                    ->execute(['sub'=>$subTotal,'disc'=>$discount,'total'=>$totalAmount,'pay'=>$payment,'due'=>$dueAmount,'mst_id'=>$mstId]);
+
+                $pdo->commit();
+                $_SESSION['success_msg'] = "Stock entry saved successfully!";
+                header("Location: ".$_SERVER['PHP_SELF']);
+                exit();
+
+            } catch(Exception $e){
+                $pdo->rollBack();
+                $message = "<div class='alert alert-danger'>Error: ".htmlspecialchars($e->getMessage())."</div>";
+            }
+        }
+    }
+
+    // ---- DELETE ----
+    if ($_POST['action']==='delete' && $canDelete){
+        $mstId = $_POST['delete_mst_id'];
         try {
             $pdo->beginTransaction();
-
-            // --- Master Record ---
-            if ($mstIdEdit) {
-                $mstId = $mstIdEdit;
-                $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")
-                    ->execute(['mst'=>$mstId,'br'=>$brCode]);
-            } else {
-                $mstId = gen_id($brCode.'-');
-                $pdo->prepare("INSERT INTO stock_mst (stock_mst_id, stock_voucher_ref, stock_entry_date, org_code, br_code, sub_total, discount, total_amount, payment, due_amount, entry_user, entry_date) 
-                    VALUES (:mst_id,:ref,NOW(),:org,:br,0,0,0,0,0,:user,NOW())")
-                    ->execute([
-                        'mst_id'=>$mstId,'ref'=>$voucherRef,'org'=>$orgCode,'br'=>$brCode,'user'=>$userId
-                    ]);
-            }
-
-            // --- Detail Records ---
-            $subTotal = 0;
-            $stmtDtl = $pdo->prepare("INSERT INTO stock_dtl (stock_dtl_id, stock_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, sub_total, original_price, commission_pct, commission_type, org_code, br_code, distributor_code, entry_user, entry_date)
-                VALUES (:dtl_id,:mst_id,:model,:cat,:sup,:price,:qty,:total,:sub_total,:orig_price,:cpct,:ctype,:org,:br,:dist,:user,NOW())");
-
-            foreach($details as $d){
-                $rowSubTotal   = $d['price'] * $d['quantity'];
-                $commissionAmt = ($d['commission_type']=='PCT') ? ($rowSubTotal * $d['commission_value']/100) : $d['commission_value'];
-                $finalTotal    = $rowSubTotal - $commissionAmt;
-                $dtlId         = gen_id($brCode.'-DTL-');
-
-                $stmtDtl->execute([
-                    'dtl_id'=>$dtlId,
-                    'mst_id'=>$mstId,
-                    'model'=>$d['model_id'],
-                    'cat'=>$d['product_category_id'],
-                    'sup'=>$d['supplier_id'],
-                    'price'=>$d['price'],
-                    'qty'=>$d['quantity'],
-                    'total'=>$finalTotal,
-                    'sub_total'=>$rowSubTotal,
-                    'orig_price'=>$d['price'],
-                    'cpct'=>$d['commission_value'],
-                    'ctype'=>$d['commission_type'],
-                    'org'=>$orgCode,
-                    'br'=>$brCode,
-                    'dist'=>$d['distributor_code'],
-                    'user'=>$userId
-                ]);
-                $subTotal += $finalTotal;
-            }
-
-            // --- Update Master totals ---
-            $totalAmount = $subTotal - $discount;
-            $dueAmount   = $totalAmount - $payment;
-
-            $pdo->prepare("UPDATE stock_mst SET sub_total=:sub, discount=:disc, total_amount=:total, payment=:pay, due_amount=:due WHERE stock_mst_id=:mst_id")
-                ->execute(['sub'=>$subTotal,'disc'=>$discount,'total'=>$totalAmount,'pay'=>$payment,'due'=>$dueAmount,'mst_id'=>$mstId]);
-
+            $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
+            $pdo->prepare("DELETE FROM stock_mst WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
             $pdo->commit();
-
-            // ---- PRG Pattern: redirect to avoid resubmission ----
-            $_SESSION['success_msg'] = "Stock entry saved successfully!";
-            header("Location: ".$_SERVER['PHP_SELF']);
-            exit();
-
-        } catch(Exception $e){
+            echo "Stock entry deleted successfully!";
+        } catch(Exception $e) {
             $pdo->rollBack();
-            $message = "<div class='alert alert-danger'>Error: ".htmlspecialchars($e->getMessage())."</div>";
+            echo "Error deleting stock entry: ".htmlspecialchars($e->getMessage());
         }
+        exit();
+    }
+
+    // ---- APPROVE ----
+    if ($_POST['action']==='approve'){
+        $mstId = $_POST['approve_mst_id'];
+        try {
+            $stmt = $pdo->prepare("UPDATE stock_mst 
+                                   SET authorized_status='Y', authorized_user=:user, authorized_date=NOW() 
+                                   WHERE stock_mst_id=:mst AND br_code=:br");
+            $stmt->execute(['user'=>$userId,'mst'=>$mstId,'br'=>$brCode]);
+            echo "Stock entry approved successfully!";
+        } catch(Exception $e) {
+            echo "Error approving stock entry: ".htmlspecialchars($e->getMessage());
+        }
+        exit();
     }
 }
 
@@ -168,24 +189,19 @@ if(!empty($_SESSION['success_msg'])){
     unset($_SESSION['success_msg']);
 }
 
-// ---- POST: Handle master delete separately ----
-if($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action']==='delete' && $canDelete){
-    $mstId = $_POST['delete_mst_id'];
-    try {
-        $pdo->beginTransaction();
-        $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
-        $pdo->prepare("DELETE FROM stock_mst WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
-        $pdo->commit();
-        echo "Stock entry deleted successfully!";
-    } catch(Exception $e) {
-        $pdo->rollBack();
-        echo "Error deleting stock entry: ".htmlspecialchars($e->getMessage());
-    }
-    exit();
-}
+// ---- Fetch suppliers & distributors for selects ----
+$stmtSup = $pdo->prepare("SELECT supplier_id, supplier_name FROM supplier WHERE br_code = :br ORDER BY supplier_name");
+$stmtSup->execute(['br' => $brCode]);
+$suppliers = $stmtSup->fetchAll(PDO::FETCH_ASSOC);
 
-// ---- Fetch all masters for display ----
-$stmtMstAll = $pdo->prepare("SELECT * FROM stock_mst WHERE br_code=:br ORDER BY stock_entry_date DESC");
+$stmtDist = $pdo->prepare("SELECT DISTRIBUTOR_CODE, DISTRIBUTOR_NAME FROM distributor WHERE ORG_CODE = :org AND DELETE_DATE IS NULL ORDER BY DISTRIBUTOR_NAME");
+$stmtDist->execute(['org' => $orgCode]);
+$distributors = $stmtDist->fetchAll(PDO::FETCH_ASSOC);
+
+// ---- Fetch all masters (only unapproved) ----
+$stmtMstAll = $pdo->prepare("SELECT * FROM stock_mst 
+                             WHERE br_code=:br AND (authorized_status IS NULL OR authorized_status='N') 
+                             ORDER BY stock_entry_date DESC");
 $stmtMstAll->execute(['br'=>$brCode]);
 $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -195,6 +211,8 @@ $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 <meta charset="utf-8">
 <title>Stock Entry - Stock3600</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
 </head>
 <body class="d-flex flex-column min-vh-100">
 <?php include 'header.php'; ?>
@@ -206,7 +224,6 @@ $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 <?php if($canInsert): ?>
 <div class="card mb-4">
 <div class="card-body">
-
 <!-- Distributor / Supplier / Category / Model -->
 <div class="row g-2 mb-2">
     <div class="col-md-3">
@@ -263,10 +280,9 @@ $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
         </select>
     </div>
     <div class="col-md-3">
-    <label>Purchase Voucher No.</label>
-    <input type="text" id="voucher_ref" class="form-control" required>
-</div>
-
+        <label>Purchase Voucher No.</label>
+        <input type="text" id="voucher_ref" class="form-control" required>
+    </div>
     <div class="col-md-1 d-grid"> 
         <button class="btn btn-primary" id="addRowBtn">Add</button>
     </div>
@@ -338,7 +354,7 @@ $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 <?php endif; ?>
 
 <!-- Display all master entries -->
-<h4>All Stock Entries</h4>
+<h4>All Stock Entries (Unapproved)</h4>
 <table class="table table-striped table-bordered">
 <thead class="table-dark">
 <tr>
@@ -356,10 +372,26 @@ $stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 <td><?= $mst['due_amount'] ?></td>
 <td><?= $mst['stock_entry_date'] ?></td>
 <td>
-    <button class="btn btn-sm btn-primary" onclick="editEntry('<?= $mst['stock_mst_id'] ?>')">Edit</button>
-    <?php if($canDelete): ?>
-    <button class="btn btn-sm btn-danger" onclick="deleteEntry('<?= $mst['stock_mst_id'] ?>')">Delete</button>
+    <?php if ($canEdit): ?>
+        <button class="btn btn-sm btn-primary" onclick="editEntry('<?= $mst['stock_mst_id'] ?>')">
+            <i class="bi bi-pencil-square"></i> Edit
+        </button>
     <?php endif; ?>
+
+    <?php if ($canApprove): ?>
+        <button class="btn btn-sm btn-success" onclick="approveEntry('<?= $mst['stock_mst_id'] ?>')">
+            <i class="bi bi-check-circle"></i> Approve
+        </button>
+    <?php endif; ?>
+
+    <?php if ($canDelete): ?>
+        <button class="btn btn-sm btn-danger" onclick="deleteEntry('<?= $mst['stock_mst_id'] ?>')">
+            <i class="bi bi-trash"></i> Delete
+        </button>
+    <?php endif; ?>
+</td>
+
+
 </td>
 </tr>
 <?php endforeach; ?>
@@ -470,36 +502,31 @@ function removeRow(idx){
     renderTable();
 }
 
-
 document.getElementById('total_discount').addEventListener('input', renderTable);
 document.getElementById('payment').addEventListener('input', renderTable);
 
 document.getElementById('stockForm').addEventListener('submit', function(e){
     const voucher = document.getElementById('voucher_ref').value.trim();
 
-    // ✅ Check if Voucher Number is empty
     if (!voucher) {
-        e.preventDefault(); // Stop form submission
-        alert("Please enter Purchase Voucher Number."); // Show message
-        document.getElementById('voucher_ref').focus(); // Focus on field
-        return; // exit
+        e.preventDefault();
+        alert("Please enter Purchase Voucher Number.");
+        document.getElementById('voucher_ref').focus();
+        return;
     }
 
-    // ✅ Optional: Check if there are any rows added
     if (details.length === 0) {
         e.preventDefault();
         alert("Please add at least one item.");
         return;
     }
 
-    // Save data to hidden fields
     document.getElementById('details_json').value = JSON.stringify(details);
     document.getElementById('hidden_discount').value = document.getElementById('total_discount').value;
     document.getElementById('hidden_payment').value = document.getElementById('payment').value;
     document.getElementById('hidden_voucher_ref').value = voucher;
     document.getElementById('action').value = 'save';
 });
-
 
 function editEntry(mstId){
     fetch(`stock_entry.php?mst_id=${mstId}`)
@@ -512,7 +539,7 @@ function editEntry(mstId){
 
         details = data.details.map(d=>({
             distributor_code: d.distributor_code,
-            distributor_name: d.distributor_code, // optionally fetch full name
+            distributor_name: d.distributor_code,
             supplier_id: d.supplier_id,
             supplier_name: d.supplier_id,
             product_category_id: d.product_category_id,
@@ -532,7 +559,6 @@ function editEntry(mstId){
 
 function deleteEntry(mstId){
     if(!confirm("Are you sure you want to delete this stock entry?")) return;
-
     fetch('stock_entry.php', {
         method: 'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
@@ -545,6 +571,21 @@ function deleteEntry(mstId){
     });
 }
 
+function approveEntry(mstId){
+    if(!confirm("Are you sure you want to approve this entry?")) return;
+    fetch('stock_entry.php', {
+        method: 'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: 'action=approve&approve_mst_id=' + encodeURIComponent(mstId)
+    })
+    .then(res => res.text())
+    .then(resp => {
+        alert(resp);
+        location.reload();
+    });
+}
+
 </script>
+<?php include 'footer.php'; ?>
 </body>
 </html>

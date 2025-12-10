@@ -16,12 +16,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         // Fetch user info and branch
         $sql = "
-            SELECT u.USER_ID, u.USER_PASSWORD, u.BR_CODE, u.USER_TYPE_ID, b.BRANCH_NAME
-            FROM user_login_info u
-            LEFT JOIN branch_info b ON u.BR_CODE = b.BR_CODE
-            WHERE u.USER_ID = :user_id
-              AND u.AUTHORIZED_STATUS = 'Y'
-            LIMIT 1
+           SELECT 
+        u.USER_ID, 
+        u.USER_PASSWORD, 
+        u.BR_CODE, 
+        u.ORG_CODE,
+        u.USER_TYPE_ID, 
+        b.BRANCH_NAME
+    FROM user_login_info u
+    LEFT JOIN branch_info b ON u.BR_CODE = b.BR_CODE
+    WHERE u.USER_ID = :user_id
+      AND u.AUTHORIZED_STATUS = 'Y'
+    LIMIT 1
         ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute(['user_id' => $userId]);
@@ -29,8 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($user && password_verify($password, $user['USER_PASSWORD'])) {
             // Derive org code from branch
-            $orgCode = substr((string)$user['BR_CODE'], 0, 3);
-
+            $orgCode = $user['ORG_CODE'];
             // Fetch organization name
             $stmtOrg = $pdo->prepare("
                 SELECT ORGANIZATION_NAME
@@ -44,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Fetch user permissions
             $stmtPerm = $pdo->prepare("
-                SELECT can_insert, can_edit, can_delete
+                SELECT can_insert, can_edit, can_delete,can_approve
                 FROM user_action_permission
                 WHERE user_type_id = :type_id
                 LIMIT 1
@@ -54,9 +59,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $canInsert = $canEdit = $canDelete = 0;
             if ($perm) {
-                $canInsert = (int)$perm['can_insert'];
-                $canEdit   = (int)$perm['can_edit'];
-                $canDelete = (int)$perm['can_delete'];
+                $canInsert  = (int)$perm['can_insert'];
+                $canEdit    = (int)$perm['can_edit'];
+                $canDelete  = (int)$perm['can_delete'];
+                $canApprove = (int)$perm['can_approve'];
             }
 
             // Store session securely
@@ -70,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'can_insert'   => $canInsert,
                 'can_edit'     => $canEdit,
                 'can_delete'   => $canDelete,
+                'can_approve'  => $canApprove,
             ];
 
             // Regenerate session ID for security

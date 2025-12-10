@@ -101,6 +101,8 @@ $suppliers = $stmt->fetchAll();
     <meta charset="UTF-8">
     <title>Supplier - Stock3600</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
 </head>
 <body class="d-flex flex-column min-vh-100">
     <?php include 'header.php'; ?>
@@ -168,14 +170,22 @@ $suppliers = $stmt->fetchAll();
                         <td><?= htmlspecialchars($sup['supplier_name']) ?></td>
                         <td><?= htmlspecialchars($sup['supplier_address']) ?></td>
                         <td><?= htmlspecialchars($sup['supplier_contact']) ?></td>
-                        <td>
-                            <?php if ($canEdit): ?>
-                                <a href="?edit=<?= urlencode($sup['supplier_id']) ?>" class="btn btn-sm btn-warning">Edit</a>
-                            <?php endif; ?>
-                            <?php if ($canDelete): ?>
-                                <a href="?delete=<?= urlencode($sup['supplier_id']) ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?')">Delete</a>
-                            <?php endif; ?>
-                        </td>
+                      <td>
+    <?php if ($canEdit): ?>
+        <a href="?edit=<?= urlencode($sup['supplier_id']) ?>" class="btn btn-sm btn-warning">
+            <i class="bi bi-pencil-square"></i> Edit
+        </a>
+    <?php endif; ?>
+
+    <?php if ($canDelete): ?>
+        <a href="?delete=<?= urlencode($sup['supplier_id']) ?>" 
+           class="btn btn-sm btn-danger" 
+           onclick="return confirm('Are you sure?')">
+            <i class="bi bi-trash"></i> Delete
+        </a>
+    <?php endif; ?>
+</td>
+
                     </tr>
                 <?php endforeach; ?>
                 <?php if (empty($suppliers)): ?>

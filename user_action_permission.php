@@ -11,67 +11,70 @@ if (!isset($_SESSION['user'])) {
 // Logged-in user info
 $userId          = $_SESSION['user']['user_id'];
 $orgCode         = $_SESSION['user']['org_code'];
-$userTypeSession = $_SESSION['user']['user_type_id'] ?? 0; // <-- FIX: define variable
+$userTypeSession = $_SESSION['user']['user_type_id'] ?? 0;
 $canInsert       = $_SESSION['user']['can_insert'] ?? 1;
 $canEdit         = $_SESSION['user']['can_edit'] ?? 1;
 $canDelete       = $_SESSION['user']['can_delete'] ?? 1;
+$canApprove      = $_SESSION['user']['can_approve'] ?? 1;
 
 $message = '';
 
-// Super Admin can manage all
+// Super Admin can manage all user types
 if ($userTypeSession == 1) {
     $userTypes = $pdo->query("SELECT USER_TYPE_ID, USER_TYPE_NAME FROM user_type_info ORDER BY USER_TYPE_NAME")
                      ->fetchAll(PDO::FETCH_ASSOC);
 } else {
-    // Non-super-admin can’t manage others
+    // Non-super-admin can only manage their own type
     $stmt = $pdo->prepare("SELECT USER_TYPE_ID, USER_TYPE_NAME FROM user_type_info WHERE USER_TYPE_ID = :uid");
     $stmt->execute(['uid' => $userTypeSession]);
     $userTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Selected user type
 $selectedUserTypeId = $_POST['user_type_id'] ?? '';
 
-// Handle Add / Update
+// Handle Add / Update permissions
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_permission'])) {
     $userTypeId = $_POST['user_type_id'];
     $canInsert  = isset($_POST['can_insert']) ? 1 : 0;
     $canEdit    = isset($_POST['can_edit']) ? 1 : 0;
     $canDelete  = isset($_POST['can_delete']) ? 1 : 0;
+    $canApprove = isset($_POST['can_approve']) ? 1 : 0;
 
-    // Check if entry exists
+    // Check if permission entry exists
     $stmt = $pdo->prepare("SELECT permission_id FROM user_action_permission WHERE user_type_id = :uid");
     $stmt->execute(['uid' => $userTypeId]);
     $exists = $stmt->fetchColumn();
 
     if ($exists) {
         $stmt = $pdo->prepare("UPDATE user_action_permission 
-                               SET can_insert = :ins, can_edit = :edit, can_delete = :del 
+                               SET can_insert = :ins, can_edit = :edit, can_delete = :del, can_approve = :app
                                WHERE user_type_id = :uid");
         $stmt->execute([
             'ins' => $canInsert,
             'edit'=> $canEdit,
             'del' => $canDelete,
+            'app' => $canApprove,
             'uid' => $userTypeId
         ]);
         $message = "<div class='alert alert-success text-center'>✅ Permissions updated successfully!</div>";
     } else {
-        $stmt = $pdo->prepare("INSERT INTO user_action_permission (user_type_id, can_insert, can_edit, can_delete)
-                               VALUES (:uid, :ins, :edit, :del)");
+        $stmt = $pdo->prepare("INSERT INTO user_action_permission (user_type_id, can_insert, can_edit, can_delete, can_approve)
+                               VALUES (:uid, :ins, :edit, :del, :app)");
         $stmt->execute([
             'uid'  => $userTypeId,
             'ins'  => $canInsert,
             'edit' => $canEdit,
-            'del'  => $canDelete
+            'del'  => $canDelete,
+            'app'  => $canApprove
         ]);
         $message = "<div class='alert alert-success text-center'>✅ Permissions created successfully!</div>";
     }
 }
 
-// Fetch existing permission for selected user type
-$currentPerm = ['can_insert'=>0, 'can_edit'=>0, 'can_delete'=>0];
+// Fetch current permissions for selected user type
+$currentPerm = ['can_insert'=>0, 'can_edit'=>0, 'can_delete'=>0, 'can_approve'=>0];
 if ($selectedUserTypeId) {
-    $stmt = $pdo->prepare("SELECT can_insert, can_edit, can_delete 
+    $stmt = $pdo->prepare("SELECT can_insert, can_edit, can_delete, can_approve
                            FROM user_action_permission 
                            WHERE user_type_id = :uid");
     $stmt->execute(['uid' => $selectedUserTypeId]);
@@ -87,7 +90,6 @@ if ($selectedUserTypeId) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="d-flex flex-column min-vh-100">
-
 <?php include 'header.php'; ?>
 
 <main class="container my-4 flex-grow-1">
@@ -95,7 +97,7 @@ if ($selectedUserTypeId) {
 
     <?= $message ?>
 
-    <!-- User Type Form -->
+    <!-- User Type Selection -->
     <div class="card mb-4 shadow-sm">
         <div class="card-body">
             <form method="post">
@@ -141,6 +143,10 @@ if ($selectedUserTypeId) {
                             <td>Can Delete</td>
                             <td><input type="checkbox" name="can_delete" <?= $currentPerm['can_delete'] ? 'checked' : '' ?>></td>
                         </tr>
+                        <tr>
+                            <td>Can Approve</td>
+                            <td><input type="checkbox" name="can_approve" <?= $currentPerm['can_approve'] ? 'checked' : '' ?>></td>
+                        </tr>
                     </tbody>
                 </table>
 
@@ -152,7 +158,6 @@ if ($selectedUserTypeId) {
         </div>
     </div>
     <?php endif; ?>
-
 </main>
 
 <?php include 'footer.php'; ?>
