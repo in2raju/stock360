@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Dec 10, 2025 at 10:45 AM
+-- Generation Time: Dec 16, 2025 at 07:57 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -18,7 +18,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `stock3600`
+-- Database: `stock360`
 --
 
 -- --------------------------------------------------------
@@ -61,10 +61,10 @@ INSERT INTO `branch_info` (`BR_CODE`, `BRANCH_NAME`, `BRANCH_ADDRESS`, `BRANCH_C
 --
 
 CREATE TABLE `customer_info` (
-  `customer_id` int(11) NOT NULL,
+  `customer_id` varchar(100) NOT NULL,
   `customer_name` varchar(200) DEFAULT NULL,
   `address` varchar(500) DEFAULT NULL,
-  `phone` varchar(15) DEFAULT NULL,
+  `customer_phone` varchar(15) DEFAULT NULL,
   `email` varchar(200) DEFAULT NULL,
   `reg_date` date DEFAULT NULL,
   `next_payment_date` date DEFAULT NULL,
@@ -77,8 +77,18 @@ CREATE TABLE `customer_info` (
   `edit_user` varchar(200) DEFAULT NULL,
   `delete_user` varchar(200) DEFAULT NULL,
   `delete_date` datetime DEFAULT NULL,
-  `delete_status` varchar(10) DEFAULT NULL
+  `delete_status` varchar(10) DEFAULT NULL,
+  `org_code` varchar(20) NOT NULL,
+  `br_code` varchar(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `customer_info`
+--
+
+INSERT INTO `customer_info` (`customer_id`, `customer_name`, `address`, `customer_phone`, `email`, `reg_date`, `next_payment_date`, `gurantor_name`, `gurantor_phone`, `nid`, `entry_date`, `entry_user`, `edit_date`, `edit_user`, `delete_user`, `delete_date`, `delete_status`, `org_code`, `br_code`) VALUES
+('101-101-20251216-002211', 'Raju Das', NULL, '01815572760', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '101', '101-101'),
+('CUST-20251215220841991', 'Saju', NULL, '01815572764', NULL, NULL, NULL, NULL, NULL, NULL, '2025-12-16 03:08:41', 'riton', NULL, NULL, NULL, NULL, NULL, '101', '101-101');
 
 -- --------------------------------------------------------
 
@@ -215,8 +225,6 @@ CREATE TRIGGER `before_insert_organization` BEFORE INSERT ON `organization_info`
 END
 $$
 DELIMITER ;
-
--- --------------------------------------------------------
 
 -- --------------------------------------------------------
 
@@ -362,6 +370,8 @@ CREATE TRIGGER `trg_generate_product_category_id` BEFORE INSERT ON `product_cate
 END
 $$
 DELIMITER ;
+
+-- --------------------------------------------------------
 
 --
 -- Table structure for table `product_model`
@@ -755,7 +765,6 @@ INSERT INTO `product_model` (`MODEL_ID`, `MODEL_NAME`, `PRODUCT_CATEGORY_ID`, `S
 CREATE TABLE `sales_dtl` (
   `sales_dtl_id` varchar(50) NOT NULL,
   `sales_mst_id` varchar(50) NOT NULL,
-  `customer_id` int(11) DEFAULT NULL,
   `model_id` varchar(20) DEFAULT NULL,
   `product_category_id` varchar(20) DEFAULT NULL,
   `supplier_id` varchar(20) DEFAULT NULL,
@@ -783,6 +792,18 @@ CREATE TABLE `sales_dtl` (
   `authorized_date` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Dumping data for table `sales_dtl`
+--
+
+INSERT INTO `sales_dtl` (`sales_dtl_id`, `sales_mst_id`, `model_id`, `product_category_id`, `supplier_id`, `price`, `quantity`, `total`, `sub_total`, `original_price`, `commission_pct`, `commission_type`, `org_code`, `br_code`, `distributor_code`, `tds`, `grade`, `sales_voucher_ref`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `delete_user`, `delete_date`, `authorized_status`, `authorized_user`, `authorized_date`) VALUES
+('101-101-DTL-20251215212100-7012', '101-101-VCH-20251215-211958.347', '1141-042339', '86-022842', '2-022740', 13500.00, 1.00, 13500.00, NULL, 13500.00, 0.00, 'PCT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251215-211958.347', 'riton', '2025-12-16 02:21:00', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251215212100-7830', '101-101-VCH-20251215-211958.347', '1088-061024', '6', '1', 50000.00, 1.00, 50000.00, NULL, 50000.00, 0.00, 'PCT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251215-211958.347', 'riton', '2025-12-16 02:21:00', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251215220841-5363', '101-101-20251215-784101', '1130-023304', '86-022842', '2-022740', 11500.00, 1.00, 11500.00, NULL, 11500.00, 0.00, 'PCT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251215-220407.189', 'riton', '2025-12-16 03:08:41', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251215221511-2698', '101-101-VCH-20251215-214742.077', '1185-140105', '86-022842', '2-022740', 11990.00, 1.00, 11990.00, NULL, 11990.00, 0.00, 'PCT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251215-214742.077', 'riton', '2025-12-16 03:15:11', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251215221511-9621', '101-101-VCH-20251215-214742.077', '1134-134940', '86-022842', '2-022740', 8290.00, 2.00, 16580.00, NULL, 8290.00, 0.00, 'PCT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251215-214742.077', 'riton', '2025-12-16 03:15:11', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251216194138-4545', '101-101-20251216-491628', '1153-123213', '66', '1', 4390.00, 2.00, 7780.00, NULL, 4390.00, 999.99, 'AMT', '101', '101-101', NULL, NULL, NULL, '101-101-VCH-20251216-194052.323', 'riton', '2025-12-17 00:41:38', NULL, NULL, NULL, NULL, 'N', NULL, NULL);
+
 -- --------------------------------------------------------
 
 --
@@ -806,8 +827,16 @@ CREATE TABLE `sales_mst` (
   `edit_date` datetime DEFAULT NULL,
   `authorized_status` char(1) DEFAULT 'N',
   `authorized_user` varchar(100) DEFAULT NULL,
-  `authorized_date` datetime DEFAULT NULL
+  `authorized_date` datetime DEFAULT NULL,
+  `customer_id` varchar(100) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `sales_mst`
+--
+
+INSERT INTO `sales_mst` (`sales_mst_id`, `sales_voucher_ref`, `sales_entry_date`, `org_code`, `br_code`, `sub_total`, `discount`, `total_amount`, `payment`, `due_amount`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `authorized_status`, `authorized_user`, `authorized_date`, `customer_id`) VALUES
+('101-101-20251216-491628', '101-101-VCH-20251216-194052.323', '2025-12-17', '101', '101-101', 7780, 500, 7280.00, 5000.00, 2280.00, 'riton', '2025-12-17 00:41:38', NULL, NULL, 'N', NULL, NULL, '101-101-20251216-002211');
 
 -- --------------------------------------------------------
 
@@ -830,7 +859,6 @@ CREATE TABLE `stock_dtl` (
   `commission_type` varchar(50) NOT NULL,
   `org_code` varchar(20) DEFAULT NULL,
   `br_code` varchar(20) DEFAULT NULL,
-  `distributor_code` varchar(50) DEFAULT NULL,
   `tds` decimal(18,2) DEFAULT NULL,
   `grade` varchar(50) DEFAULT NULL,
   `stock_voucher_ref` varchar(50) NOT NULL,
@@ -849,11 +877,10 @@ CREATE TABLE `stock_dtl` (
 -- Dumping data for table `stock_dtl`
 --
 
-INSERT INTO `stock_dtl` (`stock_dtl_id`, `stock_mst_id`, `model_id`, `product_category_id`, `supplier_id`, `price`, `quantity`, `total`, `sub_total`, `original_price`, `commission_pct`, `commission_type`, `org_code`, `br_code`, `distributor_code`, `tds`, `grade`, `stock_voucher_ref`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `delete_user`, `delete_date`, `authorized_status`, `authorized_user`, `authorized_date`) VALUES
-('101-101-DTL-20251118065018425144', '101-101-20251118064956119941', '1125-023027', '86-022842', '2-022740', 8390.00, 1.00, 8390.00, 8390.00, 8390.00, 0.00, 'PCT', '101', '101-101', '101-101-20251023-104629', NULL, NULL, '', 'riton', '2025-11-18 11:50:18', NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-('101-101-DTL-20251118065018430450', '101-101-20251118064956119941', '1185-140105', '86-022842', '2-022740', 11990.00, 1.00, 11990.00, 11990.00, 11990.00, 0.00, 'PCT', '101', '101-101', '101-101-20251023-104629', NULL, NULL, '', 'riton', '2025-11-18 11:50:18', NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-('101-101-DTL-20251118074008651246', '101-101-20251118053039741458', '1109-035515', '27', '1', 5990.00, 12.00, 64692.00, 71880.00, 5990.00, 10.00, 'PCT', '101', '101-101', '101-101-20251023-104629', NULL, NULL, '', 'riton', '2025-11-18 12:40:08', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
-('101-101-DTL-20251118074008657527', '101-101-20251118053039741458', '1190-080412', '6', '1', 59900.00, 5.00, 284525.00, 299500.00, 59900.00, 5.00, 'PCT', '101', '101-101', '101-101-20251023-104629', NULL, NULL, '', 'riton', '2025-11-18 12:40:08', NULL, NULL, NULL, NULL, 'N', NULL, NULL);
+INSERT INTO `stock_dtl` (`stock_dtl_id`, `stock_mst_id`, `model_id`, `product_category_id`, `supplier_id`, `price`, `quantity`, `total`, `sub_total`, `original_price`, `commission_pct`, `commission_type`, `org_code`, `br_code`, `tds`, `grade`, `stock_voucher_ref`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `delete_user`, `delete_date`, `authorized_status`, `authorized_user`, `authorized_date`) VALUES
+('101-101-DTL-20251216195321581', '101-101-STK-20251216-711627', '634-180206', '24', '1', 20500.00, 1.00, 20500.00, 20500.00, NULL, 0.00, 'PCT', '101', '101-101', NULL, NULL, '', 'riton', '2025-12-17 00:53:21', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251216195416557', '101-101-STK-20251216-191790', '1064-110344', '17', '1', 3990.00, 3.00, 11970.00, 11970.00, NULL, 0.00, 'PCT', '101', '101-101', NULL, NULL, '', 'riton', '2025-12-17 00:54:16', NULL, NULL, NULL, NULL, 'N', NULL, NULL),
+('101-101-DTL-20251216195416618', '101-101-STK-20251216-191790', '634-180206', '24', '1', 20500.00, 1.00, 20500.00, 20500.00, NULL, 0.00, 'PCT', '101', '101-101', NULL, NULL, '', 'riton', '2025-12-17 00:54:16', NULL, NULL, NULL, NULL, 'N', NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -878,16 +905,17 @@ CREATE TABLE `stock_mst` (
   `edit_date` datetime DEFAULT NULL,
   `authorized_status` char(1) DEFAULT 'N',
   `authorized_user` varchar(100) DEFAULT NULL,
-  `authorized_date` datetime DEFAULT NULL
+  `authorized_date` datetime DEFAULT NULL,
+  `distributor_code` varchar(50) NOT NULL DEFAULT ''
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `stock_mst`
 --
 
-INSERT INTO `stock_mst` (`stock_mst_id`, `stock_voucher_ref`, `stock_entry_date`, `org_code`, `br_code`, `sub_total`, `discount`, `total_amount`, `payment`, `due_amount`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `authorized_status`, `authorized_user`, `authorized_date`) VALUES
-('101-101-20251118053039741458', '7878787', '2025-11-18', '101', '101-101', 349217, 100, 349117.00, 100000.00, 249117.00, 'riton', '2025-11-18 10:30:39', NULL, NULL, NULL, NULL, NULL),
-('101-101-20251118064956119941', '54545454', '2025-11-18', '101', '101-101', 20380, 1000, 19380.00, 0.00, 19380.00, 'riton', '2025-11-18 11:49:56', NULL, NULL, 'Y', 'riton', '2025-12-02 16:50:52');
+INSERT INTO `stock_mst` (`stock_mst_id`, `stock_voucher_ref`, `stock_entry_date`, `org_code`, `br_code`, `sub_total`, `discount`, `total_amount`, `payment`, `due_amount`, `entry_user`, `entry_date`, `edit_user`, `edit_date`, `authorized_status`, `authorized_user`, `authorized_date`, `distributor_code`) VALUES
+('101-101-STK-20251216-191790', '979798', '2025-12-17', '101', '101-101', 32470, 0, 32470.00, 10000.00, 22470.00, 'riton', '2025-12-17 00:54:16', NULL, NULL, 'N', NULL, NULL, '101-101-20251023-104629'),
+('101-101-STK-20251216-711627', '9878', '2025-12-17', '101', '101-101', 20500, 0, 20500.00, 0.00, 20500.00, 'riton', '2025-12-17 00:53:21', NULL, NULL, 'N', NULL, NULL, '101-101-20251023-104629');
 
 -- --------------------------------------------------------
 
@@ -1218,8 +1246,7 @@ ALTER TABLE `product_model`
 --
 ALTER TABLE `sales_dtl`
   ADD PRIMARY KEY (`sales_dtl_id`),
-  ADD KEY `idx_sales_mst` (`sales_mst_id`),
-  ADD KEY `idx_customer` (`customer_id`);
+  ADD KEY `idx_sales_mst` (`sales_mst_id`);
 
 --
 -- Indexes for table `sales_mst`
@@ -1227,7 +1254,8 @@ ALTER TABLE `sales_dtl`
 ALTER TABLE `sales_mst`
   ADD PRIMARY KEY (`sales_mst_id`),
   ADD KEY `idx_org_code` (`org_code`),
-  ADD KEY `idx_br_code` (`br_code`);
+  ADD KEY `idx_br_code` (`br_code`),
+  ADD KEY `fk_sales_mst_customer` (`customer_id`);
 
 --
 -- Indexes for table `stock_dtl`
@@ -1289,12 +1317,6 @@ ALTER TABLE `user_type_info`
 --
 
 --
--- AUTO_INCREMENT for table `customer_info`
---
-ALTER TABLE `customer_info`
-  MODIFY `customer_id` int(11) NOT NULL AUTO_INCREMENT;
-
---
 -- AUTO_INCREMENT for table `menu_info`
 --
 ALTER TABLE `menu_info`
@@ -1323,55 +1345,10 @@ ALTER TABLE `branch_info`
   ADD CONSTRAINT `FK_BRANCH_ORG` FOREIGN KEY (`ORG_CODE`) REFERENCES `organization_info` (`ORG_CODE`);
 
 --
--- Constraints for table `product_model`
+-- Constraints for table `sales_mst`
 --
-ALTER TABLE `product_model`
-  ADD CONSTRAINT `product_model_ibfk_1` FOREIGN KEY (`PRODUCT_CATEGORY_ID`) REFERENCES `product_category` (`product_category_id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  ADD CONSTRAINT `product_model_ibfk_2` FOREIGN KEY (`SUPPLIER_ID`) REFERENCES `supplier` (`supplier_id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
---
--- Constraints for table `sales_dtl`
---
-ALTER TABLE `sales_dtl`
-  ADD CONSTRAINT `fk_sales_customer` FOREIGN KEY (`customer_id`) REFERENCES `customer_info` (`customer_id`);
-
---
--- Constraints for table `stock_dtl`
---
-ALTER TABLE `stock_dtl`
-  ADD CONSTRAINT `fk_dtl_br` FOREIGN KEY (`br_code`) REFERENCES `branch_info` (`BR_CODE`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_dtl_category` FOREIGN KEY (`product_category_id`) REFERENCES `product_category` (`product_category_id`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_dtl_model` FOREIGN KEY (`model_id`) REFERENCES `product_model` (`MODEL_ID`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_dtl_org` FOREIGN KEY (`org_code`) REFERENCES `organization_info` (`ORG_CODE`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_dtl_supplier` FOREIGN KEY (`supplier_id`) REFERENCES `supplier` (`supplier_id`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_stock_mst` FOREIGN KEY (`stock_mst_id`) REFERENCES `stock_mst` (`stock_mst_id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
---
--- Constraints for table `stock_mst`
---
-ALTER TABLE `stock_mst`
-  ADD CONSTRAINT `fk_mst_br` FOREIGN KEY (`br_code`) REFERENCES `branch_info` (`BR_CODE`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_mst_org` FOREIGN KEY (`org_code`) REFERENCES `organization_info` (`ORG_CODE`) ON UPDATE CASCADE;
-
---
--- Constraints for table `user_action_permission`
---
-ALTER TABLE `user_action_permission`
-  ADD CONSTRAINT `fk_action_perm_user_type` FOREIGN KEY (`user_type_id`) REFERENCES `user_type_info` (`USER_TYPE_ID`) ON UPDATE CASCADE,
-  ADD CONSTRAINT `user_action_permission_ibfk_1` FOREIGN KEY (`user_type_id`) REFERENCES `user_type_info` (`USER_TYPE_ID`) ON DELETE CASCADE ON UPDATE CASCADE;
-
---
--- Constraints for table `user_login_info`
---
-ALTER TABLE `user_login_info`
-  ADD CONSTRAINT `fk_user_login_user_type` FOREIGN KEY (`USER_TYPE_ID`) REFERENCES `user_type_info` (`USER_TYPE_ID`) ON UPDATE CASCADE;
-
---
--- Constraints for table `user_menu_view_permission`
---
-ALTER TABLE `user_menu_view_permission`
-  ADD CONSTRAINT `fk_menu` FOREIGN KEY (`MENU_ID`) REFERENCES `menu_info` (`MENU_ID`) ON DELETE CASCADE ON UPDATE CASCADE,
-  ADD CONSTRAINT `fk_menu_perm_user_type` FOREIGN KEY (`USER_TYPE_ID`) REFERENCES `user_type_info` (`USER_TYPE_ID`) ON UPDATE CASCADE;
+ALTER TABLE `sales_mst`
+  ADD CONSTRAINT `fk_sales_mst_customer` FOREIGN KEY (`customer_id`) REFERENCES `customer_info` (`customer_id`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

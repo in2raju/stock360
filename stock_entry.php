@@ -1,402 +1,453 @@
 <?php
+// stock_entry.php
 session_start();
 require 'db.php';
 
+/* ================= USER CONTEXT ================= */
 if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit();
 }
 
-$userId    = $_SESSION['user']['user_id'];
-$brCode    = $_SESSION['user']['br_code'];
-$orgCode   = $_SESSION['user']['org_code'];
-$canInsert = $_SESSION['user']['can_insert'] ?? 0;
-$canEdit   = $_SESSION['user']['can_edit'] ?? 0;
-$canDelete = $_SESSION['user']['can_delete'] ?? 0;
+$userId     = $_SESSION['user']['user_id'];
+$brCode     = $_SESSION['user']['br_code'];
+$orgCode    = $_SESSION['user']['org_code'];
+$canInsert  = $_SESSION['user']['can_insert'] ?? 0;
+$canEdit    = $_SESSION['user']['can_edit'] ?? 0;
+$canDelete  = $_SESSION['user']['can_delete'] ?? 0;
 $canApprove = $_SESSION['user']['can_approve'] ?? 0;
 
-function gen_id($prefix = '') {
-    $ms = (int)floor(microtime(true) * 1000) % 1000;
-    $ts = date('YmdHis') . sprintf('%03d', $ms);
-    return $prefix . $ts . rand(100,999);
+/* ================= HELPERS ================= */
+function gen_id($prefix=''){
+    return $prefix . date('YmdHis') . rand(100,999);
 }
 
-// ---- AJAX endpoints for fetching categories/models ----
-if (isset($_GET['fetch_cat'], $_GET['supplier_id'])) {
+function gen_unique_stock_master_id($pdo,$brCode){
+    $date = date('Ymd');
+    do {
+        $id = "{$brCode}-STK-{$date}-".str_pad(rand(0,999999),6,'0',STR_PAD_LEFT);
+        $chk = $pdo->prepare("SELECT 1 FROM stock_mst WHERE stock_mst_id=?");
+        $chk->execute([$id]);
+    } while ($chk->fetchColumn());
+    return $id;
+}
+
+/* ================= AJAX: CATEGORY ================= */
+if(isset($_GET['fetch_cat'],$_GET['supplier_id'])){
     header('Content-Type: application/json');
-    $stmt = $pdo->prepare("SELECT product_category_id, product_category_name 
-                           FROM product_category 
-                           WHERE supplier_id = :sup AND br_code = :br 
-                           ORDER BY product_category_name");
-    $stmt->execute(['sup' => $_GET['supplier_id'], 'br' => $brCode]);
+    $stmt=$pdo->prepare("SELECT product_category_id,product_category_name 
+                         FROM product_category 
+                         WHERE supplier_id=? AND br_code=?");
+    $stmt->execute([$_GET['supplier_id'],$brCode]);
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-    exit();
+    exit;
 }
 
-if (isset($_GET['fetch_model'], $_GET['product_category_id'])) {
+/* ================= AJAX: MODEL ================= */
+if(isset($_GET['fetch_model'],$_GET['product_category_id'])){
     header('Content-Type: application/json');
-    $stmt = $pdo->prepare("SELECT model_id, model_name, price 
-                           FROM product_model 
-                           WHERE product_category_id = :cat AND br_code = :br 
-                           ORDER BY model_name");
-    $stmt->execute(['cat' => $_GET['product_category_id'], 'br' => $brCode]);
+    $stmt=$pdo->prepare("SELECT model_id,model_name,price 
+                         FROM product_model 
+                         WHERE product_category_id=? AND br_code=?");
+    $stmt->execute([$_GET['product_category_id'],$brCode]);
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-    exit();
+    exit;
 }
 
-// ---- AJAX endpoint: fetch stock master + details for edit ----
-if (isset($_GET['mst_id'])) {
+/* ================= AJAX: EDIT FETCH ================= */
+if(isset($_GET['mst_id'])){
     header('Content-Type: application/json');
-    $mstId = $_GET['mst_id'];
+    $mstId=$_GET['mst_id'];
 
-    $stmt = $pdo->prepare("SELECT * FROM stock_mst WHERE stock_mst_id=:mst LIMIT 1");
-    $stmt->execute(['mst'=>$mstId]);
-    $master = $stmt->fetch(PDO::FETCH_ASSOC);
+    $mst=$pdo->prepare("SELECT sm.*,d.DISTRIBUTOR_NAME
+                        FROM stock_mst sm
+                        LEFT JOIN distributor d 
+                          ON sm.distributor_code=d.DISTRIBUTOR_CODE
+                        WHERE sm.stock_mst_id=? AND sm.br_code=?");
+    $mst->execute([$mstId,$brCode]);
+    $master=$mst->fetch(PDO::FETCH_ASSOC);
 
-    $stmtDtl = $pdo->prepare("SELECT * FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br");
-    $stmtDtl->execute(['mst'=>$mstId, 'br'=>$brCode]);
-    $details = $stmtDtl->fetchAll(PDO::FETCH_ASSOC);
+    $dtl=$pdo->prepare("SELECT sd.*, 
+                               s.supplier_name,
+                               pc.product_category_name,
+                               pm.model_name
+                        FROM stock_dtl sd
+                        LEFT JOIN supplier s 
+                          ON sd.supplier_id=s.supplier_id
+                        LEFT JOIN product_category pc 
+                          ON sd.product_category_id=pc.product_category_id
+                        LEFT JOIN product_model pm 
+                          ON sd.model_id=pm.model_id
+                        WHERE sd.stock_mst_id=? AND sd.br_code=?");
+    $dtl->execute([$mstId,$brCode]);
+
+    $details=[];
+    foreach($dtl as $d){
+        $details[]=[
+            'distributor_code'=>$master['distributor_code'],
+            'supplier_id'=>$d['supplier_id'],
+            'supplier_name'=>$d['supplier_name'] ?? 'N/A',
+            'product_category_id'=>$d['product_category_id'],
+            'product_category_name'=>$d['product_category_name'] ?? 'N/A',
+            'model_id'=>$d['model_id'],
+            'model_name'=>$d['model_name'] ?? 'N/A',
+            'price'=>(float)$d['price'],
+            'quantity'=>(float)$d['quantity'],
+            'commission_type'=>$d['commission_type'],
+            'commission_value'=>(float)$d['commission_pct'],
+            'total'=>(float)$d['total']
+        ];
+    }
 
     echo json_encode(['master'=>$master,'details'=>$details]);
-    exit();
+    exit;
 }
 
-// ---- POST: Handle Save/Update stock entry ----
-$message = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+/* ================= SAVE / UPDATE ================= */
+$message='';
+if($_SERVER['REQUEST_METHOD']==='POST' && $_POST['action']==='save' && $canInsert){
 
-    if ($_POST['action']==='save' && $canInsert) {
-        $details     = json_decode($_POST['details_json'], true);
-        $discount    = floatval($_POST['total_discount'] ?? 0);
-        $payment     = trim($_POST['payment'] ?? '');
-        $voucherRef  = trim($_POST['voucher_ref'] ?? '');
-        $mstIdEdit   = trim($_POST['mst_id'] ?? '');
+    $details=json_decode($_POST['details_json'],true);
+    $voucher=trim($_POST['voucher_ref']);
+    $discount=(float)$_POST['total_discount'];
+    $payment=(float)$_POST['payment'];
+    $dist=$_POST['distributor_code'];
+    $mstEdit=$_POST['mst_id'];
 
-        $oldVoucher  = htmlspecialchars($voucherRef);
-        $oldDiscount = htmlspecialchars($discount);
-        $oldPayment  = htmlspecialchars($payment);
-
-        if (!$voucherRef) {
-            $message = "<div class='alert alert-danger'>Please enter Purchase Voucher Number.</div>";
-        } elseif (!is_array($details) || count($details) === 0) {
-            $message = "<div class='alert alert-danger'>No items to save.</div>";
-        } elseif ($payment === '') {
-            $message = "<div class='alert alert-danger'>Payment cannot be empty.</div>";
-        } else {
-            try {
-                $pdo->beginTransaction();
-
-                // --- Master Record ---
-                if ($mstIdEdit) {
-                    $mstId = $mstIdEdit;
-                    $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")
-                        ->execute(['mst'=>$mstId,'br'=>$brCode]);
-                } else {
-                    $mstId = gen_id($brCode.'-');
-                    $pdo->prepare("INSERT INTO stock_mst (stock_mst_id, stock_voucher_ref, stock_entry_date, org_code, br_code, sub_total, discount, total_amount, payment, due_amount, entry_user, entry_date) 
-                        VALUES (:mst_id,:ref,NOW(),:org,:br,0,0,0,0,0,:user,NOW())")
-                        ->execute([
-                            'mst_id'=>$mstId,'ref'=>$voucherRef,'org'=>$orgCode,'br'=>$brCode,'user'=>$userId
-                        ]);
-                }
-
-                // --- Detail Records ---
-                $subTotal = 0;
-                $stmtDtl = $pdo->prepare("INSERT INTO stock_dtl (stock_dtl_id, stock_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, sub_total, original_price, commission_pct, commission_type, org_code, br_code, distributor_code, entry_user, entry_date)
-                    VALUES (:dtl_id,:mst_id,:model,:cat,:sup,:price,:qty,:total,:sub_total,:orig_price,:cpct,:ctype,:org,:br,:dist,:user,NOW())");
-
-                foreach($details as $d){
-                    $rowSubTotal   = $d['price'] * $d['quantity'];
-                    $commissionAmt = ($d['commission_type']=='PCT') ? ($rowSubTotal * $d['commission_value']/100) : $d['commission_value'];
-                    $finalTotal    = $rowSubTotal - $commissionAmt;
-                    $dtlId         = gen_id($brCode.'-DTL-');
-
-                    $stmtDtl->execute([
-                        'dtl_id'=>$dtlId,
-                        'mst_id'=>$mstId,
-                        'model'=>$d['model_id'],
-                        'cat'=>$d['product_category_id'],
-                        'sup'=>$d['supplier_id'],
-                        'price'=>$d['price'],
-                        'qty'=>$d['quantity'],
-                        'total'=>$finalTotal,
-                        'sub_total'=>$rowSubTotal,
-                        'orig_price'=>$d['price'],
-                        'cpct'=>$d['commission_value'],
-                        'ctype'=>$d['commission_type'],
-                        'org'=>$orgCode,
-                        'br'=>$brCode,
-                        'dist'=>$d['distributor_code'],
-                        'user'=>$userId
-                    ]);
-                    $subTotal += $finalTotal;
-                }
-
-                // --- Update Master totals ---
-                $totalAmount = $subTotal - $discount;
-                $dueAmount   = $totalAmount - $payment;
-
-                $pdo->prepare("UPDATE stock_mst SET sub_total=:sub, discount=:disc, total_amount=:total, payment=:pay, due_amount=:due WHERE stock_mst_id=:mst_id")
-                    ->execute(['sub'=>$subTotal,'disc'=>$discount,'total'=>$totalAmount,'pay'=>$payment,'due'=>$dueAmount,'mst_id'=>$mstId]);
-
-                $pdo->commit();
-                $_SESSION['success_msg'] = "Stock entry saved successfully!";
-                header("Location: ".$_SERVER['PHP_SELF']);
-                exit();
-
-            } catch(Exception $e){
-                $pdo->rollBack();
-                $message = "<div class='alert alert-danger'>Error: ".htmlspecialchars($e->getMessage())."</div>";
-            }
-        }
-    }
-
-    // ---- DELETE ----
-    if ($_POST['action']==='delete' && $canDelete){
-        $mstId = $_POST['delete_mst_id'];
-        try {
+    if(!$voucher || !$dist || empty($details)){
+        $message="<div class='alert alert-danger'>Missing required data</div>";
+    } else {
+        try{
             $pdo->beginTransaction();
-            $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
-            $pdo->prepare("DELETE FROM stock_mst WHERE stock_mst_id=:mst AND br_code=:br")->execute(['mst'=>$mstId, 'br'=>$brCode]);
-            $pdo->commit();
-            echo "Stock entry deleted successfully!";
-        } catch(Exception $e) {
-            $pdo->rollBack();
-            echo "Error deleting stock entry: ".htmlspecialchars($e->getMessage());
-        }
-        exit();
-    }
 
-    // ---- APPROVE ----
-    if ($_POST['action']==='approve'){
-        $mstId = $_POST['approve_mst_id'];
-        try {
-            $stmt = $pdo->prepare("UPDATE stock_mst 
-                                   SET authorized_status='Y', authorized_user=:user, authorized_date=NOW() 
-                                   WHERE stock_mst_id=:mst AND br_code=:br");
-            $stmt->execute(['user'=>$userId,'mst'=>$mstId,'br'=>$brCode]);
-            echo "Stock entry approved successfully!";
-        } catch(Exception $e) {
-            echo "Error approving stock entry: ".htmlspecialchars($e->getMessage());
+            if($mstEdit){
+                $chk=$pdo->prepare("SELECT authorized_status FROM stock_mst WHERE stock_mst_id=?");
+                $chk->execute([$mstEdit]);
+                if($chk->fetchColumn()==='Y'){
+                    throw new Exception("Approved entry cannot be edited");
+                }
+
+                $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=? AND br_code=?")
+                    ->execute([$mstEdit,$brCode]);
+
+                $pdo->prepare("UPDATE stock_mst 
+                               SET stock_voucher_ref=?, distributor_code=?, edit_user=?, edit_date=NOW()
+                               WHERE stock_mst_id=? AND br_code=?")
+                    ->execute([$voucher,$dist,$userId,$mstEdit,$brCode]);
+                $mstId=$mstEdit;
+            } else {
+                $mstId=gen_unique_stock_master_id($pdo,$brCode);
+                $pdo->prepare("INSERT INTO stock_mst
+                    (stock_mst_id,stock_voucher_ref,stock_entry_date,org_code,br_code,
+                     sub_total,discount,total_amount,payment,due_amount,entry_user,entry_date,distributor_code)
+                    VALUES (?,?,NOW(),?,?,0,0,0,0,0,?,NOW(),?)")
+                ->execute([$mstId,$voucher,$orgCode,$brCode,$userId,$dist]);
+            }
+
+            $sub=0;
+           $ins = $pdo->prepare("
+    INSERT INTO stock_dtl
+    (
+        stock_dtl_id,
+        stock_mst_id,
+        model_id,
+        product_category_id,
+        supplier_id,
+        price,
+        quantity,
+        total,
+        sub_total,
+        commission_pct,
+        commission_type,
+        org_code,
+        br_code,
+        entry_user,
+        entry_date
+    )
+    VALUES
+    (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
+    )
+");
+
+
+
+            foreach($details as $d){
+                $row=$d['price']*$d['quantity'];
+                $comm=($d['commission_type']=='PCT')
+                        ?($row*$d['commission_value']/100)
+                        :$d['commission_value'];
+                $total=$row-$comm;
+                $sub+=$total;
+
+                $ins->execute([
+    gen_id($brCode.'-DTL-'), // 1
+    $mstId,                 // 2
+    $d['model_id'],         // 3
+    $d['product_category_id'], // 4
+    $d['supplier_id'],      // 5
+    $d['price'],            // 6
+    $d['quantity'],         // 7
+    $total,                 // 8
+    $row,                   // 9
+    $d['commission_value'], // 10
+    $d['commission_type'],  // 11
+    $orgCode,               // 12
+    $brCode,                // 13
+    $userId                 // 14
+]);
+
+            }
+
+            $net=$sub-$discount;
+            $due=$net-$payment;
+
+            $pdo->prepare("UPDATE stock_mst 
+                           SET sub_total=?,discount=?,total_amount=?,payment=?,due_amount=?
+                           WHERE stock_mst_id=? AND br_code=?")
+                ->execute([$sub,$discount,$net,$payment,$due,$mstId,$brCode]);
+
+            $pdo->commit();
+            $_SESSION['success_msg']="Stock entry saved successfully!";
+            header("Location: stock_entry.php");
+            exit;
+
+        } catch(Exception $e){
+            $pdo->rollBack();
+            $message="<div class='alert alert-danger'>{$e->getMessage()}</div>";
         }
-        exit();
     }
 }
 
-// Show success message after redirect
-if(!empty($_SESSION['success_msg'])){
-    $message = "<div class='alert alert-success text-center'>".$_SESSION['success_msg']."</div>";
+/* ================= SUCCESS MSG ================= */
+if(isset($_SESSION['success_msg'])){
+    $message="<div class='alert alert-success text-center'>{$_SESSION['success_msg']}</div>";
     unset($_SESSION['success_msg']);
 }
 
-// ---- Fetch suppliers & distributors for selects ----
-$stmtSup = $pdo->prepare("SELECT supplier_id, supplier_name FROM supplier WHERE br_code = :br ORDER BY supplier_name");
-$stmtSup->execute(['br' => $brCode]);
-$suppliers = $stmtSup->fetchAll(PDO::FETCH_ASSOC);
+/* ================= DROPDOWNS ================= */
+$suppliers=$pdo->query("SELECT supplier_id,supplier_name FROM supplier WHERE br_code='$brCode'")->fetchAll();
+$distributors=$pdo->query("SELECT DISTRIBUTOR_CODE,DISTRIBUTOR_NAME FROM distributor WHERE ORG_CODE='$orgCode'")->fetchAll();
 
-$stmtDist = $pdo->prepare("SELECT DISTRIBUTOR_CODE, DISTRIBUTOR_NAME FROM distributor WHERE ORG_CODE = :org AND DELETE_DATE IS NULL ORDER BY DISTRIBUTOR_NAME");
-$stmtDist->execute(['org' => $orgCode]);
-$distributors = $stmtDist->fetchAll(PDO::FETCH_ASSOC);
-
-// ---- Fetch all masters (only unapproved) ----
-$stmtMstAll = $pdo->prepare("SELECT * FROM stock_mst 
-                             WHERE br_code=:br AND (authorized_status IS NULL OR authorized_status='N') 
-                             ORDER BY stock_entry_date DESC");
-$stmtMstAll->execute(['br'=>$brCode]);
-$stockMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
+$stockMasters=$pdo->query("SELECT sm.*,d.DISTRIBUTOR_NAME 
+                           FROM stock_mst sm
+                           LEFT JOIN distributor d ON sm.distributor_code=d.DISTRIBUTOR_CODE
+                           WHERE sm.br_code='$brCode'
+                           AND (sm.authorized_status IS NULL OR sm.authorized_status='N')
+                           ORDER BY sm.stock_entry_date DESC")->fetchAll();
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stock Entry - Stock3600</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 <body class="d-flex flex-column min-vh-100">
-<?php include 'header.php'; ?>
+    <?php include 'header.php'; ?>
+<?php // include 'header.php'; ?> 
+
 <main class="flex-grow-1 container py-4">
-<h3>Stock Entry</h3>
-
-<?= $message ?>
-
-<?php if($canInsert): ?>
-<div class="card mb-4">
-<div class="card-body">
-<!-- Distributor / Supplier / Category / Model -->
-<div class="row g-2 mb-2">
-    <div class="col-md-3">
-        <label>Distributor</label>
-        <select id="distributor" class="form-select" required>
-            <option value="">Select Distributor</option>
-            <?php foreach($distributors as $dist): ?>
-            <option value="<?= $dist['DISTRIBUTOR_CODE'] ?>"><?= htmlspecialchars($dist['DISTRIBUTOR_NAME']) ?></option>
-            <?php endforeach; ?>
-        </select>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3><i class="bi bi-box-seam"></i> Stock Entry (Purchase)</h3>
     </div>
-    <div class="col-md-3">
-        <label>Brand</label>
-        <select id="supplier" class="form-select" required>
-            <option value="">Select</option>
-            <?php foreach($suppliers as $sup): ?>
-            <option value="<?= $sup['supplier_id'] ?>"><?= htmlspecialchars($sup['supplier_name']) ?></option>
-            <?php endforeach; ?>
-        </select>
+
+    <?= $message ?>
+
+    <?php if($canInsert): ?>
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-primary text-white">
+             <i class="bi bi-pencil-square"></i> New/Edit Stock Entry
+        </div>
+        <div class="card-body">
+            <input type="hidden" id="mst_id_edit" name="mst_id_edit" value="">
+
+            <div class="row g-2 mb-3 border p-3 rounded bg-light">
+                <div class="col-md-4">
+                    <label class="form-label">Distributor <span class="text-danger">*</span></label>
+                    <select id="distributor" class="form-select" required>
+                        <option value="">Select Distributor</option>
+                        <?php foreach($distributors as $dist): ?>
+                        <option value="<?= htmlspecialchars($dist['DISTRIBUTOR_CODE']) ?>"><?= htmlspecialchars($dist['DISTRIBUTOR_NAME']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Purchase Voucher No. <span class="text-danger">*</span></label>
+                    <input type="text" id="voucher_ref" class="form-control" required>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <h5 class="mt-3"><i class="bi bi-cart-plus"></i> Add Product</h5>
+            <div class="row g-2 mb-2">
+                <div class="col-md-3">
+                    <label class="form-label">Brand</label>
+                    <select id="supplier" class="form-select" required>
+                        <option value="">Select</option>
+                        <?php foreach($suppliers as $sup): ?>
+                        <option value="<?= htmlspecialchars($sup['supplier_id']) ?>"><?= htmlspecialchars($sup['supplier_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Category</label>
+                    <select id="category" class="form-select" required>
+                        <option value="">Select</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Model</label>
+                    <select id="model" class="form-select" required>
+                        <option value="">Select</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-md-2">
+                    <label class="form-label">Price</label>
+                    <input type="number" id="price" class="form-control" step="0.01" min="0" value="0">
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label">Qty</label>
+                    <input type="number" id="qty" class="form-control" step="1" min="1" value="1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Commission Value</label>
+                    <input type="number" id="commission" class="form-control" step="0.01" value="0" min="0">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Commission Type</label>
+                    <select id="commission_type" class="form-select">
+                        <option value="PCT">%</option>
+                        <option value="AMT">Taka</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-grid align-self-end"> 
+                    <button class="btn btn-info text-white" id="addRowBtn"><i class="bi bi-plus-circle"></i> Add Item</button>
+                </div>
+            </div>
+
+            <hr>
+
+            <div class="table-responsive">
+                <table class="table table-striped table-sm table-bordered" id="entryTable">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Brand</th><th>Category</th><th>Model</th>
+                            <th>Price</th><th>Qty</th><th>Comm</th><th>Type</th><th>Line Total</th><th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-3 ms-auto">
+                    <label>Sub Total</label>
+                    <input type="text" id="sub_total" class="form-control text-end" readonly value="0.00">
+                </div>
+            </div>
+
+            <div class="row mt-2">
+                <div class="col-md-3 ms-auto">
+                    <label>Total Discount</label>
+                    <input type="number" id="total_discount" class="form-control text-end" step="0.01" value="0">
+                </div>
+            </div>
+
+            <div class="row mt-2">
+                <div class="col-md-3 ms-auto">
+                    <label>Net Total</label>
+                    <input type="text" id="total" class="form-control text-end" readonly value="0.00">
+                </div>
+            </div>
+
+            <div class="row mt-2">
+                <div class="col-md-3 ms-auto">
+                    <label>Payment <span class="text-danger">*</span></label>
+                    <input type="number" id="payment" class="form-control text-end" step="0.01" value="0" required>
+                </div>
+            </div>
+
+            <div class="row mt-2">
+                <div class="col-md-3 ms-auto">
+                    <label>Due</label>
+                    <input type="text" id="due" class="form-control text-end" readonly value="0.00">
+                </div>
+            </div>
+
+            <div class="text-end mt-3">
+                <form id="stockForm" method="post">
+                    <input type="hidden" name="details_json" id="details_json">
+                    <input type="hidden" name="total_discount" id="hidden_discount">
+                    <input type="hidden" name="payment" id="hidden_payment">
+                    <input type="hidden" name="voucher_ref" id="hidden_voucher_ref">
+                    <input type="hidden" name="mst_id" id="hidden_mst_id"> <input type="hidden" name="distributor_code" id="hidden_distributor_code"> <input type="hidden" name="action" value="save">
+                    <button type="submit" class="btn btn-success me-2" id="saveBtn"><i class="bi bi-save"></i> Save</button>
+                    <button type="button" class="btn btn-secondary" id="cancelEditBtn" style="display:none;"><i class="bi bi-x-circle"></i> Cancel Edit</button>
+                </form>
+            </div>
+        </div>
     </div>
-    <div class="col-md-3">
-        <label>Category</label>
-        <select id="category" class="form-select" required>
-            <option value="">Select</option>
-        </select>
-    </div>
-    <div class="col-md-3">
-        <label>Model</label>
-        <select id="model" class="form-select" required>
-            <option value="">Select</option>
-        </select>
-    </div>
-</div>
-
-<!-- Price / Qty / Commission / Type / Voucher -->
-<div class="row g-2 mb-2">
-    <div class="col-md-2">
-        <label>Price</label>
-        <input type="number" id="price" class="form-control" step="0.01">
-    </div>
-    <div class="col-md-1">
-        <label>Qty</label>
-        <input type="number" id="qty" class="form-control" step="1" min="1">
-    </div>
-    <div class="col-md-2">
-        <label>Commission</label>
-        <input type="number" id="commission" class="form-control" step="0.01" value="0">
-    </div>
-    <div class="col-md-2">
-        <label>Type</label>
-        <select id="commission_type" class="form-select">
-            <option value="PCT">%</option>
-            <option value="AMT">Taka</option>
-        </select>
-    </div>
-    <div class="col-md-3">
-        <label>Purchase Voucher No.</label>
-        <input type="text" id="voucher_ref" class="form-control" required>
-    </div>
-    <div class="col-md-1 d-grid"> 
-        <button class="btn btn-primary" id="addRowBtn">Add</button>
-    </div>
-</div>
-
-<hr>
-
-<table class="table table-bordered mt-3" id="entryTable">
-<thead class="table-dark">
-<tr>
-<th>Distributor</th><th>Brand</th><th>Category</th><th>Model</th>
-<th>Price</th><th>Qty</th><th>Commission</th><th>Type</th><th>Total</th><th>Action</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-
-<div class="row mt-3">
-<div class="col-md-3 ms-auto">
-<label>Sub Total</label>
-<input type="number" id="sub_total" class="form-control" readonly>
-</div>
-</div>
-
-<div class="row mt-2">
-<div class="col-md-3 ms-auto">
-<label>Total Discount</label>
-<input type="number" id="total_discount" class="form-control" step="0.01" value="0">
-</div>
-</div>
-
-<div class="row mt-2">
-<div class="col-md-3 ms-auto">
-<label>Total</label>
-<input type="number" id="total" class="form-control" readonly>
-</div>
-</div>
-
-<div class="row mt-2">
-<div class="col-md-3 ms-auto">
-<label>Payment</label>
-<input type="number" id="payment" class="form-control" step="0.01" value="0" required>
-</div>
-</div>
-
-<div class="row mt-2">
-<div class="col-md-3 ms-auto">
-<label>Due</label>
-<input type="number" id="due" class="form-control" readonly>
-</div>
-</div>
-
-<div class="text-end mt-3">
-<form id="stockForm" method="post">
-    <input type="hidden" name="details_json" id="details_json">
-    <input type="hidden" name="total_discount" id="hidden_discount">
-    <input type="hidden" name="payment" id="hidden_payment">
-    <input type="hidden" name="voucher_ref" id="hidden_voucher_ref">
-    <input type="hidden" name="mst_id" id="mst_id">
-    <input type="hidden" name="action" id="action" value="save">
-    <button type="submit" class="btn btn-success" id="saveBtn">Save</button>
-</form>
-</div>
-
-</div>
-</div>
-<?php else: ?>
-<div class="alert alert-warning">You do not have permission to insert records.</div>
-<?php endif; ?>
-
-<!-- Display all master entries -->
-<h4>All Stock Entries (Unapproved)</h4>
-<table class="table table-striped table-bordered">
-<thead class="table-dark">
-<tr>
-<th>Voucher</th><th>Sub Total</th><th>Discount</th><th>Total</th><th>Payment</th><th>Due</th><th>Date</th><th>Actions</th>
-</tr>
-</thead>
-<tbody>
-<?php foreach($stockMasters as $mst): ?>
-<tr>
-<td><?= htmlspecialchars($mst['stock_voucher_ref']) ?></td>
-<td><?= $mst['sub_total'] ?></td>
-<td><?= $mst['discount'] ?></td>
-<td><?= $mst['total_amount'] ?></td>
-<td><?= $mst['payment'] ?></td>
-<td><?= $mst['due_amount'] ?></td>
-<td><?= $mst['stock_entry_date'] ?></td>
-<td>
-    <?php if ($canEdit): ?>
-        <button class="btn btn-sm btn-primary" onclick="editEntry('<?= $mst['stock_mst_id'] ?>')">
-            <i class="bi bi-pencil-square"></i> Edit
-        </button>
+    <?php else: ?>
+    <div class="alert alert-warning">You do not have permission to insert records.</div>
     <?php endif; ?>
 
-    <?php if ($canApprove): ?>
-        <button class="btn btn-sm btn-success" onclick="approveEntry('<?= $mst['stock_mst_id'] ?>')">
-            <i class="bi bi-check-circle"></i> Approve
-        </button>
-    <?php endif; ?>
+    <hr>
 
-    <?php if ($canDelete): ?>
-        <button class="btn btn-sm btn-danger" onclick="deleteEntry('<?= $mst['stock_mst_id'] ?>')">
-            <i class="bi bi-trash"></i> Delete
-        </button>
-    <?php endif; ?>
-</td>
+    <h4><i class="bi bi-list-check"></i> Unapproved Stock Entries</h4>
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>Voucher</th>
+                    <th>Distributor</th>
+                    <th class="text-end">Net Total</th>
+                    <th class="text-end">Payment</th>
+                    <th class="text-end">Due</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach($stockMasters as $mst): ?>
+                <tr>
+                    <td><?= htmlspecialchars($mst['stock_voucher_ref']) ?></td>
+                    <td><?= htmlspecialchars($mst['DISTRIBUTOR_NAME'] ?? $mst['distributor_code']) ?></td>
+                    <td class="text-end"><?= number_format($mst['total_amount'], 2) ?></td>
+                    <td class="text-end"><?= number_format($mst['payment'], 2) ?></td>
+                    <td class="text-end"><?= number_format($mst['due_amount'], 2) ?></td>
+                    <td><?= htmlspecialchars(date('Y-m-d H:i', strtotime($mst['stock_entry_date']))) ?></td>
+                    <td>
+                        <?php if ($canEdit): ?>
+                            <button class="btn btn-sm btn-primary" onclick="editEntry('<?= htmlspecialchars($mst['stock_mst_id']) ?>')">
+                                <i class="bi bi-pencil-square"></i> Edit
+                            </button>
+                        <?php endif; ?>
 
+                        <?php if ($canApprove): ?>
+                            <button class="btn btn-sm btn-success" onclick="approveEntry('<?= htmlspecialchars($mst['stock_mst_id']) ?>')">
+                                <i class="bi bi-check-circle"></i> Approve
+                            </button>
+                        <?php endif; ?>
 
-</td>
-</tr>
-<?php endforeach; ?>
-</tbody>
-</table>
+                        <?php if ($canDelete): ?>
+                            <button class="btn btn-sm btn-danger" onclick="deleteEntry('<?= htmlspecialchars($mst['stock_mst_id']) ?>')">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
 
 </main>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -408,93 +459,132 @@ const supplier = document.getElementById('supplier');
 const category = document.getElementById('category');
 const model = document.getElementById('model');
 
+const voucherRefInput = document.getElementById('voucher_ref');
+const priceInput = document.getElementById('price');
+const qtyInput = document.getElementById('qty');
+const commInput = document.getElementById('commission');
+const commTypeSelect = document.getElementById('commission_type');
+const totalDiscountInput = document.getElementById('total_discount');
+const paymentInput = document.getElementById('payment');
+const subTotalInput = document.getElementById('sub_total');
+const totalInput = document.getElementById('total');
+const dueInput = document.getElementById('due');
+const mstIdHidden = document.getElementById('hidden_mst_id');
+const saveBtn = document.getElementById('saveBtn');
+const cancelEditBtn = document.getElementById('cancelEditBtn');
+
+
+// --- Dependent Select Logic ---
 supplier.addEventListener('change', function() {
-    fetch(`stock_entry.php?fetch_cat=1&supplier_id=${this.value}`)
-        .then(res => res.json())
-        .then(data => {
-            category.innerHTML = '<option value="">Select</option>';
-            data.forEach(c => category.innerHTML += `<option value="${c.product_category_id}">${c.product_category_name}</option>`);
-        });
+    category.innerHTML = '<option value="">Select</option>';
+    model.innerHTML = '<option value="">Select</option>';
+    if (this.value) {
+        fetch(`stock_entry.php?fetch_cat=1&supplier_id=${this.value}`)
+            .then(res => res.json())
+            .then(data => {
+                data.forEach(c => category.innerHTML += `<option value="${c.product_category_id}">${c.product_category_name}</option>`);
+            });
+    }
 });
 
 category.addEventListener('change', function() {
-    fetch(`stock_entry.php?fetch_model=1&product_category_id=${this.value}`)
-        .then(res => res.json())
-        .then(data => {
-            model.innerHTML = '<option value="">Select</option>';
-            data.forEach(m => model.innerHTML += `<option value="${m.model_id}" data-price="${m.price}">${m.model_name}</option>`);
-        });
+    model.innerHTML = '<option value="">Select</option>';
+    if (this.value) {
+        fetch(`stock_entry.php?fetch_model=1&product_category_id=${this.value}`)
+            .then(res => res.json())
+            .then(data => {
+                data.forEach(m => model.innerHTML += `<option value="${m.model_id}" data-price="${m.price}">${m.model_name}</option>`);
+            });
+    }
 });
 
 model.addEventListener('change', function() {
-    document.getElementById('price').value = this.selectedOptions[0]?.getAttribute('data-price') || '';
+    priceInput.value = this.selectedOptions[0]?.getAttribute('data-price') || 0;
+    qtyInput.value = 1;
+    commInput.value = 0;
 });
 
+
+// --- Item Addition Logic ---
 document.getElementById('addRowBtn').addEventListener('click', function(e) {
     e.preventDefault();
-    const price = parseFloat(document.getElementById('price').value) || 0;
-    const qty = parseFloat(document.getElementById('qty').value) || 0;
-    const comm = parseFloat(document.getElementById('commission').value) || 0;
-    const ctype = document.getElementById('commission_type').value;
-
-    if(!distributor.value || !supplier.value || !category.value || !model.value || qty<=0){
-        alert("Please fill all fields correctly.");
+    const price = parseFloat(priceInput.value) || 0;
+    const qty = parseFloat(qtyInput.value) || 0;
+    const comm = parseFloat(commInput.value) || 0;
+    const ctype = commTypeSelect.value;
+    
+    if(!distributor.value || !supplier.value || !category.value || !model.value || qty <= 0 || price <= 0){
+        alert("Please select Distributor, Brand, Category, Model and enter valid Price/Quantity.");
         return;
     }
 
-    const rowBase = price*qty;
-    const total = ctype==='PCT'? rowBase-(rowBase*comm/100): rowBase-comm;
+    const rowBase = price * qty;
+    const commissionAmt = (ctype === 'PCT') ? (rowBase * comm / 100) : comm;
+    const finalTotal = rowBase - commissionAmt;
 
     const entry = {
-        distributor_code: distributor.value,
+        // Names for display
         distributor_name: distributor.selectedOptions[0].text,
-        supplier_id: supplier.value,
         supplier_name: supplier.selectedOptions[0].text,
-        product_category_id: category.value,
         product_category_name: category.selectedOptions[0].text,
-        model_id: model.value,
         model_name: model.selectedOptions[0].text,
+        
+        // IDs and values for saving
+        distributor_code: distributor.value,
+        supplier_id: supplier.value,
+        product_category_id: category.value,
+        model_id: model.value,
         price: price,
         quantity: qty,
         commission_type: ctype,
         commission_value: comm,
-        total: total
+        total: finalTotal
     };
     details.push(entry);
     renderTable();
 
+    // Reset item entry fields (except Distributor, as it's typically the same for the whole invoice)
     supplier.value = '';
     category.innerHTML='<option value="">Select</option>';
     model.innerHTML='<option value="">Select</option>';
-    document.getElementById('price').value='';
-    document.getElementById('qty').value='';
-    document.getElementById('commission').value='';
+    priceInput.value='0';
+    qtyInput.value='1';
+    commInput.value='0';
+    commTypeSelect.value='PCT';
+    supplier.focus();
 });
 
+
+// --- Table Rendering and Calculations ---
 function renderTable(){
     const tbody = document.querySelector("#entryTable tbody");
     tbody.innerHTML="";
     let subtotal = 0;
+    
     details.forEach((d,i)=>{
-        subtotal+=d.total;
+        subtotal += d.total;
         tbody.innerHTML+=`<tr>
-        <td>${d.distributor_name}</td>
-        <td>${d.supplier_name}</td>
-        <td>${d.product_category_name}</td>
-        <td>${d.model_name}</td>
-        <td>${d.price.toFixed(2)}</td>
-        <td>${d.quantity}</td>
-        <td>${d.commission_value}</td>
-        <td>${d.commission_type}</td>
-        <td>${d.total.toFixed(2)}</td>
-        <td><button class="btn btn-sm btn-danger" onclick="removeRow(${i})">X</button></td>
+            
+            <td>${d.supplier_name}</td>
+            <td>${d.product_category_name}</td>
+            <td>${d.model_name}</td>
+            <td class="text-end">${d.price.toFixed(2)}</td>
+            <td class="text-center">${d.quantity}</td>
+            <td class="text-end">${d.commission_value}</td>
+            <td class="text-center">${d.commission_type}</td>
+            <td class="text-end">${d.total.toFixed(2)}</td>
+            <td class="text-center"><button class="btn btn-sm btn-danger" onclick="removeRow(${i})">X</button></td>
         </tr>`;
     });
-    document.getElementById('sub_total').value=subtotal.toFixed(2);
-    const disc = parseFloat(document.getElementById('total_discount').value)||0;
-    const pay = parseFloat(document.getElementById('payment').value)||0;
-    document.getElementById('total').value=(subtotal-disc).toFixed(2);
-    document.getElementById('due').value=((subtotal-disc)-pay).toFixed(2);
+    
+    const disc = parseFloat(totalDiscountInput.value)||0;
+    const pay = parseFloat(paymentInput.value)||0;
+    const netTotal = subtotal - disc;
+    const due = netTotal - pay;
+
+    subTotalInput.value = subtotal.toFixed(2);
+    totalInput.value = netTotal.toFixed(2);
+    dueInput.value = due.toFixed(2);
 }
 
 function removeRow(idx){
@@ -502,16 +592,26 @@ function removeRow(idx){
     renderTable();
 }
 
-document.getElementById('total_discount').addEventListener('input', renderTable);
-document.getElementById('payment').addEventListener('input', renderTable);
+totalDiscountInput.addEventListener('input', renderTable);
+paymentInput.addEventListener('input', renderTable);
 
+
+// --- Form Submission ---
 document.getElementById('stockForm').addEventListener('submit', function(e){
-    const voucher = document.getElementById('voucher_ref').value.trim();
+    const voucher = voucherRefInput.value.trim();
+    const distCode = distributor.value;
 
     if (!voucher) {
         e.preventDefault();
         alert("Please enter Purchase Voucher Number.");
-        document.getElementById('voucher_ref').focus();
+        voucherRefInput.focus();
+        return;
+    }
+    
+    if (!distCode) {
+        e.preventDefault();
+        alert("Please select a Distributor.");
+        distributor.focus();
         return;
     }
 
@@ -521,42 +621,65 @@ document.getElementById('stockForm').addEventListener('submit', function(e){
         return;
     }
 
+    // Set hidden fields for POST
     document.getElementById('details_json').value = JSON.stringify(details);
-    document.getElementById('hidden_discount').value = document.getElementById('total_discount').value;
-    document.getElementById('hidden_payment').value = document.getElementById('payment').value;
+    document.getElementById('hidden_discount').value = totalDiscountInput.value;
+    document.getElementById('hidden_payment').value = paymentInput.value;
     document.getElementById('hidden_voucher_ref').value = voucher;
-    document.getElementById('action').value = 'save';
+    document.getElementById('hidden_mst_id').value = mstIdHidden.value; // For update
+    document.getElementById('hidden_distributor_code').value = distCode;
 });
+
+// --- Edit/Cancel Functions ---
+function resetForm() {
+    details = [];
+    renderTable();
+    mstIdHidden.value = '';
+    voucherRefInput.value = '';
+    totalDiscountInput.value = '0';
+    paymentInput.value = '0';
+    distributor.value = '';
+
+    // Clear item fields
+    supplier.value = '';
+    category.innerHTML = '<option value="">Select</option>';
+    model.innerHTML = '<option value="">Select</option>';
+    priceInput.value = '0';
+    qtyInput.value = '1';
+    commInput.value = '0';
+    commTypeSelect.value = 'PCT';
+
+    saveBtn.innerHTML = '<i class="bi bi-save"></i> Save';
+    cancelEditBtn.style.display = 'none';
+    window.scrollTo({top:0, behavior:'smooth'});
+}
+
+cancelEditBtn.addEventListener('click', resetForm);
 
 function editEntry(mstId){
     fetch(`stock_entry.php?mst_id=${mstId}`)
     .then(res=>res.json())
     .then(data=>{
-        document.getElementById('voucher_ref').value = data.master.stock_voucher_ref;
-        document.getElementById('total_discount').value = data.master.discount;
-        document.getElementById('payment').value = data.master.payment;
-        document.getElementById('mst_id').value = mstId;
+        if (!data.master) { alert('Master not found'); return; }
 
-        details = data.details.map(d=>({
-            distributor_code: d.distributor_code,
-            distributor_name: d.distributor_code,
-            supplier_id: d.supplier_id,
-            supplier_name: d.supplier_id,
-            product_category_id: d.product_category_id,
-            product_category_name: d.product_category_id,
-            model_id: d.model_id,
-            model_name: d.model_id,
-            price: parseFloat(d.price),
-            quantity: parseFloat(d.quantity),
-            commission_type: d.commission_type,
-            commission_value: parseFloat(d.commission_pct),
-            total: parseFloat(d.total)
-        }));
+        voucherRefInput.value = data.master.stock_voucher_ref || '';
+        totalDiscountInput.value = data.master.discount || 0;
+        paymentInput.value = data.master.payment || 0;
+        distributor.value = data.master.distributor_code || '';
+        mstIdHidden.value = mstId;
+
+        // The AJAX response already includes names (Distributor, Supplier, Category, Model)
+        details = data.details; 
+        
         renderTable();
-        document.getElementById('saveBtn').textContent='Update';
-    });
+        saveBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update';
+        cancelEditBtn.style.display = 'inline-block';
+        window.scrollTo({top:0, behavior:'smooth'});
+    })
+    .catch(e => console.error("Error fetching entry for edit:", e));
 }
 
+// --- Status Change Functions ---
 function deleteEntry(mstId){
     if(!confirm("Are you sure you want to delete this stock entry?")) return;
     fetch('stock_entry.php', {
@@ -568,11 +691,12 @@ function deleteEntry(mstId){
     .then(resp => {
         alert(resp);
         location.reload();
-    });
+    })
+    .catch(e => alert("Network or server error during delete."));
 }
 
 function approveEntry(mstId){
-    if(!confirm("Are you sure you want to approve this entry?")) return;
+    if(!confirm("Are you sure you want to approve this entry? This action cannot be undone.")) return;
     fetch('stock_entry.php', {
         method: 'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
@@ -582,10 +706,12 @@ function approveEntry(mstId){
     .then(resp => {
         alert(resp);
         location.reload();
-    });
+    })
+    .catch(e => alert("Network or server error during approval."));
 }
 
+document.addEventListener('DOMContentLoaded', renderTable);
 </script>
-<?php include 'footer.php'; ?>
+<?php  include 'footer.php'; ?>
 </body>
 </html>

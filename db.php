@@ -1,7 +1,7 @@
 <?php
 
 $host = 'localhost';
-$db   = 'stock3600';
+$db   = 'stock360';
 $user = 'root';
 $pass = '';
 $charset = 'utf8mb4';
