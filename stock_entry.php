@@ -103,9 +103,51 @@ if(isset($_GET['mst_id'])){
     exit;
 }
 
+/* ================= ACTION: APPROVE ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'approve' && $canApprove) {
+    header('Content-Type: text/plain');
+    $mstId = $_POST['approve_mst_id'] ?? '';
+    try {
+        $stmtCheck = $pdo->prepare("SELECT authorized_status FROM stock_mst WHERE stock_mst_id = :mst AND br_code = :br LIMIT 1");
+        $stmtCheck->execute(['mst'=>$mstId,'br'=>$brCode]);
+        if ($stmtCheck->fetchColumn() === 'Y') {
+             throw new Exception("Stock entry is already approved.");
+        }
+        $stmt = $pdo->prepare("UPDATE stock_mst SET authorized_status = 'Y', authorized_user = :user, authorized_date = NOW() WHERE stock_mst_id = :mst AND br_code = :br");
+        $stmt->execute(['user'=>$userId, 'mst'=>$mstId, 'br'=>$brCode]);
+        echo "Stock entry approved successfully!";
+    } catch (Exception $e) {
+        echo "Error approving stock entry: " . htmlspecialchars($e->getMessage());
+    }
+    exit();
+}
+
+/* ================= ACTION: DELETE ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && $canDelete) {
+    header('Content-Type: text/plain');
+    $mstId = $_POST['delete_mst_id'] ?? '';
+    try {
+        $pdo->beginTransaction();
+        // Check if approved
+        $chk = $pdo->prepare("SELECT authorized_status FROM stock_mst WHERE stock_mst_id=?");
+        $chk->execute([$mstId]);
+        if($chk->fetchColumn() === 'Y') throw new Exception("Cannot delete an approved entry.");
+
+        $pdo->prepare("DELETE FROM stock_dtl WHERE stock_mst_id=? AND br_code=?")->execute([$mstId, $brCode]);
+        $pdo->prepare("DELETE FROM stock_mst WHERE stock_mst_id=? AND br_code=?")->execute([$mstId, $brCode]);
+        
+        $pdo->commit();
+        echo "Stock entry deleted successfully!";
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        echo "Error: " . $e->getMessage();
+    }
+    exit();
+}
+
 /* ================= SAVE / UPDATE ================= */
 $message='';
-if($_SERVER['REQUEST_METHOD']==='POST' && $_POST['action']==='save' && $canInsert){
+if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['action']) && $_POST['action']==='save' && $canInsert){
 
     $details=json_decode($_POST['details_json'],true);
     $voucher=trim($_POST['voucher_ref']);
@@ -145,58 +187,34 @@ if($_SERVER['REQUEST_METHOD']==='POST' && $_POST['action']==='save' && $canInser
             }
 
             $sub=0;
-           $ins = $pdo->prepare("
-    INSERT INTO stock_dtl
-    (
-        stock_dtl_id,
-        stock_mst_id,
-        model_id,
-        product_category_id,
-        supplier_id,
-        price,
-        quantity,
-        total,
-        sub_total,
-        commission_pct,
-        commission_type,
-        org_code,
-        br_code,
-        entry_user,
-        entry_date
-    )
-    VALUES
-    (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-    )
-");
-
-
+            $ins = $pdo->prepare("
+                INSERT INTO stock_dtl
+                (stock_dtl_id, stock_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, sub_total, commission_pct, commission_type, org_code, br_code, entry_user, entry_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            ");
 
             foreach($details as $d){
                 $row=$d['price']*$d['quantity'];
-                $comm=($d['commission_type']=='PCT')
-                        ?($row*$d['commission_value']/100)
-                        :$d['commission_value'];
+                $comm=($d['commission_type']=='PCT') ? ($row*$d['commission_value']/100) : $d['commission_value'];
                 $total=$row-$comm;
                 $sub+=$total;
 
                 $ins->execute([
-    gen_id($brCode.'-DTL-'), // 1
-    $mstId,                 // 2
-    $d['model_id'],         // 3
-    $d['product_category_id'], // 4
-    $d['supplier_id'],      // 5
-    $d['price'],            // 6
-    $d['quantity'],         // 7
-    $total,                 // 8
-    $row,                   // 9
-    $d['commission_value'], // 10
-    $d['commission_type'],  // 11
-    $orgCode,               // 12
-    $brCode,                // 13
-    $userId                 // 14
-]);
-
+                    gen_id($brCode.'-DTL-'), 
+                    $mstId, 
+                    $d['model_id'], 
+                    $d['product_category_id'], 
+                    $d['supplier_id'], 
+                    $d['price'], 
+                    $d['quantity'], 
+                    $total, 
+                    $row, 
+                    $d['commission_value'], 
+                    $d['commission_type'], 
+                    $orgCode, 
+                    $brCode, 
+                    $userId
+                ]);
             }
 
             $net=$sub-$discount;
