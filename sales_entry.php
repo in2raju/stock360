@@ -25,7 +25,7 @@ function gen_sales_voucher($brCode) {
     $microtime = microtime(true);
     $dateStr = date('Ymd', $microtime);
     $timeStr = date('His', $microtime) . substr((string)($microtime - floor($microtime)), 1, 4);
-    return "{$brCode}-VCH-{$dateStr}-{$timeStr}";
+    return "{$brCode}-V-{$dateStr}-{$timeStr}";
 }
 
 /**
@@ -58,7 +58,7 @@ function gen_unique_sales_master_id($pdo, $brCode) {
 function gen_detail_id($brCode) {
     $dateStr = date('YmdHis'); 
     $rand = rand(1000, 9999); 
-    return "{$brCode}-DTL-{$dateStr}-{$rand}";
+    return "{$brCode}-D-{$dateStr}-{$rand}";
 }
 
 /**
@@ -66,7 +66,7 @@ function gen_detail_id($brCode) {
  */
 function gen_customer_id() {
     // Using a simple timestamp-based ID for this example. Replace with your actual customer ID generation logic.
-    return 'CUST-' . date('YmdHis') . rand(100, 999); 
+    return 'C-' . date('YmdHis') . rand(100, 999); 
 }
 
 
@@ -392,7 +392,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
       <input type="hidden" id="mst_id_edit" value="">
       
       <div class="row g-2 mb-3 border p-2 rounded bg-light">
-        <h5><i class="bi bi-person-lines-fill"></i> Customer Details</h5>
+        
         <div class="col-md-3">
           <label>Customer Phone <span class="text-danger">*</span></label>
           <input type="text" id="customer_phone" class="form-control" required placeholder="Enter phone number">
@@ -465,6 +465,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
         
         <div class="col-md-2 d-grid align-self-end">
           <button class="btn btn-primary" id="addRowBtn"><i class="bi bi-plus-circle"></i> Add Item</button>
+        
         </div>
       </div>
 
@@ -619,46 +620,34 @@ function debounce(func, delay) {
 }
 
 // --- Core Lookup Function ---
-function lookupCustomerByPhone(isImmediate = false) {
+function lookupCustomerByPhone() {
     const phone = customerPhoneInput.value.trim();
-    
-    // Reset fields while waiting for lookup, or if input is cleared
+
+    // Reset fields
     customerNameInput.value = '';
     customerIdHidden.value = '';
     customerNameInput.readOnly = false;
-    
-    if (phone.length < 5) { // Minimum length check before querying DB
+
+    // Only lookup when phone is exactly 11 digits
+    if (!/^\d{11}$/.test(phone)) {
         return;
     }
-    
-    // If lookup is triggered by Enter, cancel any pending debounced lookup
-    if (isImmediate) {
-        clearTimeout(debouncedLookupTimeout);
-    }
 
-    // Send AJAX request to lookup customer
     fetch(`sales_entry.php?lookup_customer_by_phone=1&phone=${encodeURIComponent(phone)}`)
-        .then(r => r.json())
+        .then(res => res.json())
         .then(data => {
             if (data.found) {
-                // Existing customer found
-                customerNameInput.value = data.customer_name;
-                customerIdHidden.value = data.customer_id;
-                customerNameInput.readOnly = true; // Lock name field
-                console.log(`Customer found: ${data.customer_name} (ID: ${data.customer_id})`);
+                customerNameInput.value   = data.customer_name;
+                customerIdHidden.value    = data.customer_id;
+                customerNameInput.readOnly = true; // lock field
             } else {
-                // New customer - let them type the name
-                customerNameInput.value = ''; 
-                customerIdHidden.value = '';  
-                customerNameInput.readOnly = false; // Unlock name field
+                customerNameInput.readOnly = false;
                 customerNameInput.focus();
-                console.log("Customer not found. Ready to enter new name.");
             }
         })
-        .catch(e => {
-            console.error("Error during customer lookup:", e);
-        });
+        .catch(err => console.error("Lookup error:", err));
 }
+
 
 // --- Event Handlers Setup ---
 

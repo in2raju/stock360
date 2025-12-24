@@ -277,9 +277,7 @@ $stockMasters=$pdo->query("SELECT sm.*,d.DISTRIBUTOR_NAME
 
     <?php if($canInsert): ?>
     <div class="card mb-4 shadow-sm">
-        <div class="card-header bg-primary text-white">
-             <i class="bi bi-pencil-square"></i> New/Edit Stock Entry
-        </div>
+        
         <div class="card-body">
             <input type="hidden" id="mst_id_edit" name="mst_id_edit" value="">
 
@@ -347,7 +345,7 @@ $stockMasters=$pdo->query("SELECT sm.*,d.DISTRIBUTOR_NAME
                     </select>
                 </div>
                 <div class="col-md-2 d-grid align-self-end"> 
-                    <button class="btn btn-info text-white" id="addRowBtn"><i class="bi bi-plus-circle"></i> Add Item</button>
+                    <button class="btn btn-primary" id="addRowBtn"><i class="bi bi-plus-circle"></i> Add Item</button>
                 </div>
             </div>
 
