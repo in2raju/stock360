@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-card card shadow-sm">
         <div class="card-body p-4">
-            <h4 class="card-title text-center mb-4">Stock3600 Login</h4>
+            <h4 class="card-title text-center mb-4">Stock360 Login</h4>
 
             <?php if ($error): ?>
                 <div class="alert alert-danger"><?= htmlspecialchars($error, ENT_QUOTES) ?></div>

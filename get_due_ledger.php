@@ -13,7 +13,7 @@ $balance = 0;
 // 1. Previous Due
 // -------------------------
 $stmt = $pdo->prepare("
-    SELECT previous_due_amount, entry_date
+    SELECT prev_due_id, previous_due_amount, entry_date
     FROM customer_previous_due
     WHERE customer_id = ?
       AND br_code = ?
@@ -21,18 +21,21 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
 $prevDue = $stmt->fetch(PDO::FETCH_ASSOC);
+
 if ($prevDue) {
     $balance += $prevDue['previous_due_amount'];
     $ledger[] = [
         'entry_date' => $prevDue['entry_date'] ?? '',
         'type' => 'Previous Due',
-        'ref_id' => null,
-        'sales_voucher_ref' => 'Previous Due',
-        'dr' => number_format($prevDue['previous_due_amount'],2),
+        'ref_id' => $prevDue['prev_due_id'],             // ref_id হিসেবে prev_due_id
+        'sales_voucher_ref' => $prevDue['prev_due_id'], // Ledger-এর Voucher কলামে prev_due_id দেখাবে
+        'dr' => number_format($prevDue['previous_due_amount'], 2),
         'cr' => '',
-        'balance' => number_format($balance,2)
+        'balance' => number_format($balance, 2)
     ];
 }
+
+
 
 // -------------------------
 // 2. Voucher Due
@@ -66,10 +69,20 @@ foreach ($vouchers as $v) {
 // 3. Installment Paid
 // -------------------------
 $stmt = $pdo->prepare("
-    SELECT d.installment_id, d.sales_mst_id, d.installment_amount, d.installment_date, 
-           m.sales_voucher_ref
+    SELECT 
+        d.installment_id, 
+        d.sales_mst_id, 
+        d.installment_amount, 
+        d.installment_date, 
+        m.sales_voucher_ref,
+        p.prev_due_id
     FROM customer_due_installment d
     LEFT JOIN sales_mst m ON d.sales_mst_id = m.sales_mst_id
+    LEFT JOIN customer_previous_due p 
+        ON d.sales_mst_id IS NULL 
+        AND d.customer_id = p.customer_id
+        AND d.br_code = p.br_code
+        AND d.org_code = p.org_code
     WHERE d.customer_id = ?
       AND d.br_code = ?
       AND d.org_code = ?
@@ -81,8 +94,12 @@ $installments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 foreach ($installments as $i) {
     $balance -= $i['installment_amount'];
 
-    // Determine reference
-    $ref = $i['sales_voucher_ref'] ?? ($i['sales_mst_id'] === null ? 'Previous Due' : 'Unknown');
+    // Determine reference: sales_voucher_ref normally, or prev_due_id if sales_mst_id is NULL
+    if ($i['sales_mst_id'] === null) {
+        $ref = $i['prev_due_id'] ?? 'Previous Due';
+    } else {
+        $ref = $i['sales_voucher_ref'] ?? 'Unknown';
+    }
 
     $ledger[] = [
         'entry_date' => $i['installment_date'],
@@ -90,8 +107,8 @@ foreach ($installments as $i) {
         'ref_id' => $i['installment_id'],
         'sales_voucher_ref' => $ref,
         'dr' => '',
-        'cr' => number_format($i['installment_amount'],2),
-        'balance' => number_format($balance,2)
+        'cr' => number_format($i['installment_amount'], 2),
+        'balance' => number_format($balance, 2)
     ];
 }
 
