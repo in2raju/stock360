@@ -10,14 +10,12 @@ $ledger = [];
 $balance = 0;
 
 // -------------------------
-// 1. Previous Due
+// 1. Previous Due (Debit)
 // -------------------------
 $stmt = $pdo->prepare("
     SELECT prev_due_id, previous_due_amount, entry_date
     FROM customer_previous_due
-    WHERE customer_id = ?
-      AND br_code = ?
-      AND org_code = ?
+    WHERE customer_id = ? AND br_code = ? AND org_code = ?
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
 $prevDue = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -25,28 +23,25 @@ $prevDue = $stmt->fetch(PDO::FETCH_ASSOC);
 if ($prevDue) {
     $balance += $prevDue['previous_due_amount'];
     $ledger[] = [
-        'entry_date' => $prevDue['entry_date'] ?? '',
+        'entry_date' => $prevDue['entry_date'],
         'type' => 'Previous Due',
-        'ref_id' => $prevDue['prev_due_id'],             // ref_id হিসেবে prev_due_id
-        'sales_voucher_ref' => $prevDue['prev_due_id'], // Ledger-এর Voucher কলামে prev_due_id দেখাবে
+        'ref_id' => $prevDue['prev_due_id'],
+        'sales_mst_id' => null,
+        'sales_voucher_ref' => 'PREV-DUE',
         'dr' => number_format($prevDue['previous_due_amount'], 2),
         'cr' => '',
-        'balance' => number_format($balance, 2)
+        'balance' => $balance, // Numeric for now for sorting
+        'authorized_status' => 'Y'
     ];
 }
 
-
-
 // -------------------------
-// 2. Voucher Due
+// 2. Voucher Due (Debit)
 // -------------------------
 $stmt = $pdo->prepare("
     SELECT sales_mst_id, sales_voucher_ref, due_amount, sales_entry_date
     FROM sales_mst
-    WHERE customer_id = ?
-      AND br_code = ?
-      AND org_code = ?
-      AND authorized_status='Y'
+    WHERE customer_id = ? AND br_code = ? AND org_code = ? AND authorized_status='Y'
     ORDER BY sales_entry_date ASC
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
@@ -58,15 +53,17 @@ foreach ($vouchers as $v) {
         'entry_date' => $v['sales_entry_date'],
         'type' => 'Voucher Due',
         'ref_id' => $v['sales_mst_id'],
+        'sales_mst_id' => $v['sales_mst_id'],
         'sales_voucher_ref' => $v['sales_voucher_ref'],
-        'dr' => number_format($v['due_amount'],2),
+        'dr' => number_format($v['due_amount'], 2),
         'cr' => '',
-        'balance' => number_format($balance,2)
+        'balance' => $balance,
+        'authorized_status' => 'Y'
     ];
 }
 
 // -------------------------
-// 3. Installment Paid
+// 3. Installment Paid (Credit)
 // -------------------------
 $stmt = $pdo->prepare("
     SELECT 
@@ -74,18 +71,11 @@ $stmt = $pdo->prepare("
         d.sales_mst_id, 
         d.installment_amount, 
         d.installment_date, 
-        m.sales_voucher_ref,
-        p.prev_due_id
+        d.authorized_status,
+        m.sales_voucher_ref
     FROM customer_due_installment d
     LEFT JOIN sales_mst m ON d.sales_mst_id = m.sales_mst_id
-    LEFT JOIN customer_previous_due p 
-        ON d.sales_mst_id IS NULL 
-        AND d.customer_id = p.customer_id
-        AND d.br_code = p.br_code
-        AND d.org_code = p.org_code
-    WHERE d.customer_id = ?
-      AND d.br_code = ?
-      AND d.org_code = ?
+    WHERE d.customer_id = ? AND d.br_code = ? AND d.org_code = ?
     ORDER BY d.installment_date ASC
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
@@ -93,23 +83,30 @@ $installments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($installments as $i) {
     $balance -= $i['installment_amount'];
-
-    // Determine reference: sales_voucher_ref normally, or prev_due_id if sales_mst_id is NULL
-    if ($i['sales_mst_id'] === null) {
-        $ref = $i['prev_due_id'] ?? 'Previous Due';
-    } else {
-        $ref = $i['sales_voucher_ref'] ?? 'Unknown';
-    }
-
     $ledger[] = [
         'entry_date' => $i['installment_date'],
         'type' => 'Installment Paid',
         'ref_id' => $i['installment_id'],
-        'sales_voucher_ref' => $ref,
+        'sales_mst_id' => $i['sales_mst_id'],
+        'sales_voucher_ref' => $i['sales_mst_id'] ? $i['sales_voucher_ref'] : 'Previous Due',
         'dr' => '',
         'cr' => number_format($i['installment_amount'], 2),
-        'balance' => number_format($balance, 2)
+        'balance' => $balance,
+        'authorized_status' => $i['authorized_status']
     ];
+}
+
+// -------------------------
+// 4. Final Sorting & Formatting
+// -------------------------
+// Sort by date so the running balance logic holds up
+usort($ledger, function($a, $b) {
+    return strtotime($a['entry_date']) - strtotime($b['entry_date']);
+});
+
+// Format the numeric balance for the JSON response
+foreach ($ledger as &$row) {
+    $row['balance'] = number_format($row['balance'], 2);
 }
 
 header('Content-Type: application/json');
