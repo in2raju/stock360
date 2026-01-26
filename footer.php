@@ -23,7 +23,7 @@
     }
 
     .footer {
-        background: linear-gradient(90deg, #3234c2ff 0%, #07c2c2ff 100%);
+        background: linear-gradient(90deg, rgb(204, 18, 18) 0%, rgb(204, 18, 18) 100%);
         border-top: 1px solid rgba(255, 255, 255, 0.15);
         color: #dbe4ff;
         text-align: center;

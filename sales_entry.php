@@ -471,8 +471,8 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 
       <hr>
 
-      <table class="table table-bordered mt-3" id="entryTable">
-        <thead class="table-dark">
+      <table class="table table-bordered  mt-3 table-hover border-3" id="entryTable">
+        <thead class="table-secondary">
           <tr>
             <th>Brand</th><th>Category</th><th>Model</th>
             <th>Price</th><th>Qty</th><th>Commission Value</th><th>Commission Type</th><th>Line Total</th><th>Action</th>
@@ -543,8 +543,8 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
   <hr>
 
   <h4>Unapproved Sales Entries</h4>
-  <table class="table table-striped table-bordered">
-    <thead class="table-dark">
+  <table class="table table-bordered  mt-3 table-hover border-3">
+    <thead class="table-secondary">
       <tr>
         <th>Voucher</th><th>Customer</th><th>Net Total</th><th>Payment</th><th>Due</th><th>Date</th><th>Actions</th>
       </tr>

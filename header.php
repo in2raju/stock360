@@ -48,7 +48,7 @@ foreach ($menus as $menu) {
     <style>
         /* === Smart Gradient Navbar === */
         .navbar {
-            background: linear-gradient(90deg, #3234c2ff 0%, #07c2c2ff 100%);
+            background: linear-gradient(90deg, rgb(204, 18, 18) 0%, rgb(204, 18, 18) 100%);
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
             transition: background 0.3s ease;
         }
