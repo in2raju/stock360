@@ -155,8 +155,8 @@ $stockList = $pdo->query("SELECT stock_mst_id, stock_voucher_ref FROM stock_mst 
         <div class="card-body">
             <h5 class="mb-3">Distributor Ledger</h5>
             <div class="table-responsive">
-                <table class="table table-bordered table-striped align-middle table-vcenter" id="ledger_table">
-                    <thead class="table-dark text-center">
+                <table class="table table-bordered table-hover border-3" id="ledger_table">
+                    <thead class="table-secondary">
                         <tr>
                             <th>Date</th><th>Type</th><th>Voucher</th><th>Dr (Paid)</th><th>Cr (Due)</th><th>Balance</th><th width="280">Actions</th>
                         </tr>
