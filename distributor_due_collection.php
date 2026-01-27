@@ -254,9 +254,14 @@ function loadLedger() {
     });
 }
 
+// UPDATE: EDIT BUTTON HANDLER
 $(document).on('click', '.edit-btn', function() {
     if(!auth.canEdit) return;
+
+    // Disable relevant fields during edit mode
     $("#distributor_code, #stock_mst_id").prop('disabled', true);
+    // Disable the current due field as requested
+    $("#current_due").prop('disabled', true).addClass('bg-light');
 
     let id = $(this).data('id');
     let amt = $(this).data('amt'); 
@@ -304,8 +309,27 @@ $(document).on('click', '.delete-btn', function() {
     }
 });
 
-$("#payForm").on("submit", function() {
-    $("#distributor_code, #stock_mst_id").prop('disabled', false);
+// UPDATE: FORM SUBMIT HANDLER
+$("#payForm").on("submit", function(e) {
+    // Re-enable fields before submitting so PHP can receive the data
+    $("#distributor_code, #stock_mst_id, #current_due").prop('disabled', false);
+
+    let currentDue = parseFloat($("#current_due").val()) || 0;
+    let amount     = parseFloat($("#installment_amount").val()) || 0;
+
+    // Validation
+    if (amount > currentDue) {
+        alert("❌ Amount cannot exceed Current Due (" + currentDue.toFixed(2) + ")");
+        $("#installment_amount").focus();
+        
+        // If validation fails and we are in edit mode, re-disable them to maintain UI state
+        if($("#edit_installment_id").val() !== "") {
+            $("#distributor_code, #stock_mst_id, #current_due").prop('disabled', true);
+        }
+        
+        e.preventDefault();
+        return false;
+    }
 });
 </script>
 

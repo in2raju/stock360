@@ -352,8 +352,8 @@ $stockMasters=$pdo->query("SELECT sm.*,d.DISTRIBUTOR_NAME
             <hr>
 
             <div class="table-responsive">
-                <table class="table table-striped table-sm table-bordered" id="entryTable">
-                    <thead class="table-dark">
+                <table class="table table-bordered  mt-3 table-hover border-3" id="entryTable">
+        <thead class="table-secondary">
                         <tr>
                             <th>Brand</th><th>Category</th><th>Model</th>
                             <th>Price</th><th>Qty</th><th>Comm</th><th>Type</th><th>Line Total</th><th>Action</th>
@@ -419,8 +419,8 @@ $stockMasters=$pdo->query("SELECT sm.*,d.DISTRIBUTOR_NAME
 
     <h4><i class="bi bi-list-check"></i> Unapproved Stock Entries</h4>
     <div class="table-responsive">
-        <table class="table table-striped table-bordered align-middle">
-            <thead class="table-dark">
+       <table class="table table-bordered  mt-3 table-hover border-3" id="entryTable">
+        <thead class="table-secondary">
                 <tr>
                     <th>Voucher</th>
                     <th>Distributor</th>

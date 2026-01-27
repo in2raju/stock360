@@ -9,22 +9,40 @@ $orgCode = $_SESSION['user']['org_code'] ?? '';
 $ledger  = [];
 $balance = 0;
 
-/* 1. Previous Due (CR) */
-$stmt = $pdo->prepare("SELECT distributor_due_id, due_amount, due_date FROM distributor_previous_due WHERE distributor_code = ? AND br_code = ? AND org_code = ?");
+/* -------------------------
+// 1. Distributor Previous Dues (Credit)
+// ------------------------- */
+$stmt = $pdo->prepare("
+    SELECT distributor_due_id, due_amount, due_date, entry_date, authorized_status, remarks
+    FROM distributor_previous_due 
+    WHERE distributor_code = ? 
+      AND br_code = ? 
+      AND org_code = ?
+      AND authorized_status = 'Y'
+    ORDER BY due_date ASC, entry_date ASC
+");
 $stmt->execute([$distributor_code, $brCode, $orgCode]);
-$prevDue = $stmt->fetch(PDO::FETCH_ASSOC);
+$allDistPrevDues = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-if ($prevDue) {
-    $balance += $prevDue['due_amount'];
-    $ledger[] = [
-        'entry_date'        => $prevDue['due_date'],
-        'type'              => 'Previous Due',
-        'stock_voucher_ref' => 'Opening Balance',
-        'dr'                => '',
-        'cr'                => number_format($prevDue['due_amount'], 2),
-        'balance'           => number_format($balance, 2),
-        'authorized_status' => 'Y' 
-    ];
+if ($allDistPrevDues) {
+    foreach ($allDistPrevDues as $due) {
+        $amount = (float)$due['due_amount'];
+        
+        // For a Distributor (Supplier), previous due increases the Credit balance
+        $balance += $amount; 
+        
+        $ledger[] = [
+            'entry_date'        => !empty($due['due_date']) ? $due['due_date'] : $due['entry_date'],
+            'type'              => 'Previous Due',
+            'ref_id'            => $due['distributor_due_id'],
+            'stock_voucher_ref' => $due['distributor_due_id'], // Using actual ID as reference
+            'remarks'           => $due['remarks'],
+            'dr'                => '', // No Debit for opening dues to suppliers
+            'cr'                => number_format($amount, 2, '.', ''),
+            'balance'           => $balance, 
+            'authorized_status' => $due['authorized_status']
+        ];
+    }
 }
 
 /* 2. Stock Vouchers (CR) */

@@ -470,7 +470,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
       </div>
 
       <hr>
-
+ <div class="table-responsive">
       <table class="table table-bordered  mt-3 table-hover border-3" id="entryTable">
         <thead class="table-secondary">
           <tr>
@@ -515,7 +515,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
           <input type="text" id="due" class="form-control" readonly value="0.00">
         </div>
       </div>
-      
+            </div>
       <div class="text-end mt-3">
         <form id="salesForm" method="post">
           <input type="hidden" name="details_json" id="details_json">
@@ -543,6 +543,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
   <hr>
 
   <h4>Unapproved Sales Entries</h4>
+  <div class="table-responsive">
   <table class="table table-bordered  mt-3 table-hover border-3">
     <thead class="table-secondary">
       <tr>
@@ -581,7 +582,7 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
       <?php endforeach; ?>
     </tbody>
   </table>
-
+            </div>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

@@ -16,9 +16,9 @@ $paidAmount  = 0;
    Get Previous Due
 --------------------------*/
 $stmt = $pdo->prepare("
-    SELECT previous_due_amount
+    SELECT sum(previous_due_amount)
     FROM customer_previous_due
-    WHERE customer_id = ? AND br_code = ? AND org_code = ?
+    WHERE customer_id = ? AND br_code = ? AND org_code = ? and authorized_status='Y'
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
 $previousDue = $stmt->fetchColumn() ?: 0;

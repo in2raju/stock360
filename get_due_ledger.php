@@ -10,29 +10,38 @@ $ledger = [];
 $balance = 0;
 
 // -------------------------
-// 1. Previous Due (Debit)
+// 1. All Previous Dues (Debit)
 // -------------------------
 $stmt = $pdo->prepare("
-    SELECT prev_due_id, previous_due_amount, entry_date
+    SELECT prev_due_id, previous_due_amount, entry_date, authorized_status
     FROM customer_previous_due
-    WHERE customer_id = ? AND br_code = ? AND org_code = ?
+    WHERE customer_id = ? 
+      AND br_code = ? 
+      AND org_code = ?
+      AND authorized_status = 'Y'
+    ORDER BY entry_date ASC
 ");
 $stmt->execute([$customer_id, $brCode, $orgCode]);
-$prevDue = $stmt->fetch(PDO::FETCH_ASSOC);
+$allPrevDues = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-if ($prevDue) {
-    $balance += $prevDue['previous_due_amount'];
-    $ledger[] = [
-        'entry_date' => $prevDue['entry_date'],
-        'type' => 'Previous Due',
-        'ref_id' => $prevDue['prev_due_id'],
-        'sales_mst_id' => null,
-        'sales_voucher_ref' => 'PREV-DUE',
-        'dr' => number_format($prevDue['previous_due_amount'], 2),
-        'cr' => '',
-        'balance' => $balance, // Numeric for now for sorting
-        'authorized_status' => 'Y'
-    ];
+if ($allPrevDues) {
+    foreach ($allPrevDues as $due) {
+        $amount = (float)$due['previous_due_amount'];
+        $balance += $amount;
+        
+        $ledger[] = [
+            'entry_date'        => $due['entry_date'],
+            'type'              => 'Previous Due',
+            'ref_id'            => $due['prev_due_id'],
+            'sales_mst_id'      => null,
+            // Changed from 'PREV-DUE' to the actual ID from the database
+            'sales_voucher_ref' => $due['prev_due_id'], 
+            'dr'                => number_format($amount, 2, '.', ''),
+            'cr'                => '',
+            'balance'           => $balance, 
+            'authorized_status' => $due['authorized_status']
+        ];
+    }
 }
 
 // -------------------------
