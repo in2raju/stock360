@@ -126,9 +126,15 @@ foreach ($menus as $menu) {
 <nav class="navbar navbar-expand-lg navbar-dark">
     <div class="container-fluid">
         <!-- Brand -->
-        <a class="navbar-brand" href="home.php">
-            <?= htmlspecialchars($_SESSION['user']['org_name'] ?? 'Stock36') ?>
-        </a>
+       <a class="navbar-brand d-flex flex-column" href="home.php">
+    <span>
+        <?= htmlspecialchars($_SESSION['user']['org_name'] ?? 'Stock36') ?>
+    </span>
+    <small id="currentDateTime" style="font-size: 0.75rem; opacity: 0.85;">
+        <?= date('d M Y, h:i:s A') ?>
+    </small>
+</a>
+
 
         <!-- Toggler -->
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent">
@@ -189,6 +195,24 @@ foreach ($menus as $menu) {
     </div>
 </nav>
 
+<script>
+    function updateDateTime() {
+        const now = new Date();
+        const options = {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        };
+        document.getElementById('currentDateTime').innerText =
+            now.toLocaleString('en-GB', options);
+    }
+
+    setInterval(updateDateTime, 1000);
+</script>
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
