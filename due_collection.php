@@ -168,8 +168,8 @@ $salesList = $pdo->query("SELECT sales_mst_id, sales_voucher_ref FROM sales_mst 
         <div class="card-body">
             <h5 class="mb-3">Customer Ledger</h5>
             <div class="table-responsive">
-                <table class="table table-bordered table-striped align-middle table-vcenter" id="ledger_table">
-                    <thead class="table-dark text-center">
+                <table class="table table-bordered table-hover border-3" id="ledger_table">
+                    <thead class="table-secondary">
                         <tr>
                             <th>Date</th><th>Type</th><th>Voucher</th><th>Dr (Due)</th><th>Cr (Paid)</th><th>Balance</th><th width="280">Actions</th>
                         </tr>
