@@ -71,30 +71,77 @@ function gen_customer_id() {
 
 
 // --- AJAX Handlers ---
-
-// ---------- AJAX: fetch categories by supplier ----------
+// ---------- AJAX: fetch categories that exist in stock_dtl ----------
 if (isset($_GET['fetch_cat'], $_GET['supplier_id'])) {
     header('Content-Type: application/json');
-    $stmt = $pdo->prepare("SELECT product_category_id, product_category_name 
-                           FROM product_category 
-                           WHERE supplier_id = :sup AND br_code = :br 
-                           ORDER BY product_category_name");
-    $stmt->execute(['sup'=>$_GET['supplier_id'],'br'=>$brCode]);
+
+    $sql = "
+        SELECT DISTINCT
+            pc.product_category_id,
+            pc.product_category_name
+        FROM stock_dtl d
+        INNER JOIN product_category pc
+            ON pc.product_category_id = d.product_category_id
+        WHERE d.supplier_id = :sup
+          AND d.br_code     = :br
+          AND d.org_code    = :org
+        GROUP BY 
+            pc.product_category_id,
+            pc.product_category_name
+        HAVING SUM(d.quantity) > 0
+        ORDER BY pc.product_category_name
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':sup' => (int) $_GET['supplier_id'],
+        ':br'  => $brCode,
+        ':org' => $orgCode
+    ]);
+
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     exit();
 }
 
-// ---------- AJAX: fetch models by category ----------
+// ---------- AJAX: fetch models that exist in stock_dtl ----------
 if (isset($_GET['fetch_model'], $_GET['product_category_id'])) {
     header('Content-Type: application/json');
-    $stmt = $pdo->prepare("SELECT model_id, model_name, price 
-                           FROM product_model 
-                           WHERE product_category_id = :cat AND br_code = :br 
-                           ORDER BY model_name");
-    $stmt->execute(['cat'=>$_GET['product_category_id'],'br'=>$brCode]);
+
+    $sql = "
+        SELECT 
+    sd.model_id,
+    sd.price,
+    sd.stock_mst_id,
+    sd.stock_dtl_id, -- required for your Foreign Key
+    CONCAT(
+        CAST(pm.model_name AS CHAR),
+        ' |', CAST(sd.price AS CHAR),
+        ' |', CAST(sd.buying_price AS CHAR),
+        ' |', CAST(sd.remaining AS CHAR),
+        ' |', CAST(DATE(sd.stock_date) AS CHAR)
+    ) AS model_name
+FROM stock_details_view sd
+INNER JOIN product_model pm
+    ON pm.model_id = sd.model_id
+WHERE sd.product_category_id = :cat
+  AND sd.br_code = :br
+  AND sd.org_code = :org
+ORDER BY pm.model_name;
+
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':cat' => (int) $_GET['product_category_id'],
+        ':br'  => $brCode,
+        ':org' => $orgCode
+    ]);
+
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     exit();
 }
+
+
 
 // ---------- AJAX: Look up customer by phone number (NEW) ----------
 if (isset($_GET['lookup_customer_by_phone'], $_GET['phone'])) {
@@ -258,27 +305,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 // 3. Insert detail rows
-                $stmtDtlIns = $pdo->prepare("INSERT INTO sales_dtl 
-                    (sales_dtl_id, sales_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, original_price, commission_pct, commission_type, org_code, br_code, sales_voucher_ref, entry_user, entry_date, authorized_status)
-                    VALUES
-                    (:dtl, :mst, :model, :cat, :sup, :price, :qty, :total, :orig, :cpct, :ctype, :org, :br, :ref, :user, NOW(), 'N')");
+                $stmtDtlIns = $pdo->prepare("
+    INSERT INTO sales_dtl 
+    (sales_dtl_id, sales_mst_id, model_id, product_category_id, supplier_id, price, quantity, total, 
+     original_price, commission_pct, commission_type, org_code, br_code, sales_voucher_ref, 
+     entry_user, entry_date, authorized_status, stock_mst_id, stock_dtl_id)
+    VALUES
+    (:dtl, :mst, :model, :cat, :sup, :price, :qty, :total, 
+     :orig, :cpct, :ctype, :org, :br, :ref, 
+     :user, NOW(), 'N', :stock_mst_id, :stock_dtl_id)
+");
 
-                foreach ($details as $d) {
-                    $rowBase = floatval($d['price']) * floatval($d['quantity']);
-                    $commissionVal = floatval($d['commission_value']);
-                    $commissionType = $d['commission_type'];
-                    $commissionAmt = ($commissionType === 'PCT') ? ($rowBase * ($commissionVal / 100.0)) : $commissionVal;
-                    $finalTotal = $rowBase - $commissionAmt;
-                    $dtlId = gen_detail_id($brCode);
+foreach ($details as $d) {
+    $rowBase = floatval($d['price']) * floatval($d['quantity']);
+    $commissionVal = floatval($d['commission_value']);
+    $commissionType = $d['commission_type'];
+    $commissionAmt = ($commissionType === 'PCT') ? ($rowBase * ($commissionVal / 100.0)) : $commissionVal;
+    $finalTotal = $rowBase - $commissionAmt;
+    $dtlId = gen_detail_id($brCode);
 
-                    $stmtDtlIns->execute([
-                        'dtl' => $dtlId, 'mst' => $mstId, 'model'=> $d['model_id'], 'cat' => $d['product_category_id'],
-                        'sup' => $d['supplier_id'], 'price'=> floatval($d['price']), 'qty' => floatval($d['quantity']),
-                        'total'=> $finalTotal, 'orig' => floatval($d['price']), 'cpct'=> $commissionVal, 
-                        'ctype'=> $commissionType, 'org' => $orgCode, 'br' => $brCode, 'ref' => $voucherRef, 'user'=> $userId
-                    ]);
-                    $subTotal += $finalTotal; 
-                }
+    $stmtDtlIns->execute([
+        'dtl'          => $dtlId,
+        'mst'          => $mstId,
+        'model'        => $d['model_id'],
+        'cat'          => $d['product_category_id'],
+        'sup'          => $d['supplier_id'],
+        'price'        => floatval($d['price']),
+        'qty'          => floatval($d['quantity']),
+        'total'        => $finalTotal,
+        'orig'         => floatval($d['price']),
+        'cpct'         => $commissionVal,
+        'ctype'        => $commissionType,
+        'org'          => $orgCode,
+        'br'           => $brCode,
+        'ref'          => $voucherRef,
+        'user'         => $userId,
+        'stock_mst_id' => $d['stock_mst_id'],
+        'stock_dtl_id' => $d['stock_dtl_id']
+    ]);
+
+    $subTotal += $finalTotal; 
+}
 
                 // 4. Update master totals
                 $totalAmount = $subTotal - $discount;
@@ -381,7 +448,10 @@ $salesMasters = $stmtMstAll->fetchAll(PDO::FETCH_ASSOC);
 <?php include 'header.php'; ?>
 <main class="container py-4 flex-grow-1">
   <div class="d-flex justify-content-between align-items-center mb-3">
-      <h3>Sales Entry</h3>
+      <h3 class="d-flex align-items-center">
+    <i class="bi bi-cart-check-fill me-2 text-primary"></i> 
+    Sales Entry
+</h3>
   </div>
 
   <?= $message ?>
@@ -705,16 +775,36 @@ category?.addEventListener('change', function() {
     fetch(`sales_entry.php?fetch_model=1&product_category_id=${this.value}`)
       .then(r => r.json())
       .then(data => {
-        data.forEach(m => model.innerHTML += `<option value="${m.model_id}" data-price="${m.price}">${m.model_name}</option>`);
+        data.forEach(m => {
+          model.innerHTML += `<option 
+                                value="${m.model_id}" 
+                                data-price="${m.price}" 
+                                data-stock-mst="${m.stock_mst_id}" 
+                                data-stock-dtl="${m.stock_dtl_id}">
+                                ${m.model_name}
+                              </option>`;
+        });
       });
   }
+});
+
+// When model is selected, priceInput remains same as before
+model?.addEventListener('change', function() {
+    const selected = this.selectedOptions[0];
+    if (!selected) return;
+
+    priceInput.value = selected.getAttribute('data-price') || 0;
+    
+    // Store these in the model element's dataset for the Add Row button to grab
+    this.dataset.stockMstId = selected.getAttribute('data-stock-mst');
+    this.dataset.stockDtlId = selected.getAttribute('data-stock-dtl');
 });
 
 model?.addEventListener('change', function() {
   priceInput.value = this.selectedOptions[0]?.getAttribute('data-price') || 0;
 });
 
-// --- Item Addition Logic (Unchanged) ---
+// --- Item Addition Logic (Updated) ---
 document.getElementById('addRowBtn')?.addEventListener('click', function(e){
   e.preventDefault();
   
@@ -739,41 +829,53 @@ document.getElementById('addRowBtn')?.addEventListener('click', function(e){
     alert('Please select model and enter valid price and quantity (min 1).');
     return;
   }
-  
+
+  // --- NEW: Extract clean model name for display ---
+  // Transforms "WAP-OL06 | 20500.00 | ..." into "WAP-OL06"
+  const cleanModelName = selectedModel.text.split('|')[0].trim();
+
+  // --- Get stock IDs and Original Buying Price ---
+  const stockMstId = selectedModel.getAttribute('data-stock-mst');
+  const stockDtlId = selectedModel.getAttribute('data-stock-dtl');
+  const originalPrice = parseFloat(selectedModel.getAttribute('data-original-price')) || 0;
+
   const rowBase = price * qty;
   let commissionAmt = (ctype === 'PCT') ? (rowBase * comm / 100) : comm;
   const total = rowBase - commissionAmt;
 
   const entry = {
-    // Display names
     supplier_name: supplier.selectedOptions?.[0]?.text || supplier_id,
     product_category_name: category.selectedOptions?.[0]?.text || product_category_id,
-    model_name: selectedModel?.text || model_id,
     
-    // IDs and values for saving
+    // Use the clean name for the table rendering
+    model_name: cleanModelName, 
+    
     supplier_id: supplier_id,
     product_category_id: product_category_id,
     model_id: model_id,
-    price: price,
+    price: price,           // Selling Price
+    original_price: originalPrice, // Buying Price (Cost)
     quantity: qty,
     commission_type: ctype,
     commission_value: comm, 
-    total: total
+    total: total,
+    
+    stock_mst_id: stockMstId,
+    stock_dtl_id: stockDtlId
   };
 
   details.push(entry);
   renderTable();
 
-  // reset item entry fields
-  model.innerHTML = '<option value="">Select</option>';
-  category.innerHTML = '<option value="">Select</option>';
-  supplier.value = '';
+  // --- Reset fields ---
+  model.value = '';
   priceInput.value = 0;
   qtyInput.value = 1;
   commInput.value = 0;
   commTypeSelect.value = 'PCT';
-  supplier.focus();
+  model.focus(); 
 });
+
 
 // --- Table and Calculation Management (Unchanged) ---
 function renderTable(){
