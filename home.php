@@ -25,7 +25,7 @@ $totalProducts->execute([$userOrg, $brCode]);
 $totalProducts = $totalProducts->fetchColumn();
 
 // Total Sales
-$totalSales = $pdo->prepare("SELECT SUM(quantity) FROM sales_dtl WHERE org_code=? AND br_code=?");
+$totalSales = $pdo->prepare("SELECT SUM(sold) FROM stock_details_view WHERE org_code=? AND br_code=?");
 $totalSales->execute([$userOrg, $brCode]);
 $totalSales = $totalSales->fetchColumn();
 
@@ -34,24 +34,25 @@ $totalDistributors = $pdo->prepare("SELECT COUNT(*) FROM distributor WHERE org_c
 $totalDistributors->execute([$userOrg, $brCode]);
 $totalDistributors = $totalDistributors->fetchColumn();
 
-// Fetch category-wise product quantities
+// Prepare statement
 $categoryData = $pdo->prepare("
     SELECT 
-    c.product_category_name, 
-    SUM(s.quantity) AS total_quantity
-FROM 
-    product_category c
-LEFT JOIN 
-    stock_dtl s 
-    ON c.product_category_id = s.product_category_id
-    AND s.org_code = ? 
-    AND s.br_code = ?
-GROUP BY 
-    c.product_category_name
-HAVING 
-    total_quantity > 0
+        product_category_name, 
+        SUM(remaining) AS total_quantity
+    FROM 
+        stock_details_view 
+    WHERE 
+        org_code = :org_code AND br_code = :br_code
+    GROUP BY 
+        product_category_name
 ");
-$categoryData->execute([$userOrg, $brCode]);
+
+// Bind parameters explicitly
+$categoryData->bindParam(':org_code', $userOrg, PDO::PARAM_STR);
+$categoryData->bindParam(':br_code', $brCode, PDO::PARAM_STR);
+
+// Execute
+$categoryData->execute();
 
 $categories = [];
 $quantities = [];
@@ -59,6 +60,7 @@ while ($row = $categoryData->fetch(PDO::FETCH_ASSOC)) {
     $categories[] = $row['product_category_name'];
     $quantities[] = $row['total_quantity'] ?? 0;
 }
+
 
 include 'header.php';
 ?>

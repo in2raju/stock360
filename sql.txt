@@ -1,0 +1,139 @@
+SELECT 
+    pm.MODEL_ID, 
+    pm.MODEL_NAME, 
+    pm.PRODUCT_CATEGORY_ID, 
+    pc.product_category_name, 
+    pm.SUPPLIER_ID, 
+    s.supplier_name, 
+    pm.PRICE
+FROM 
+    product_model pm
+LEFT JOIN 
+    product_category pc ON pm.PRODUCT_CATEGORY_ID = pc.product_category_id
+LEFT JOIN 
+    supplier s ON pm.SUPPLIER_ID = s.supplier_id;
+
+
+
+
+
+
+SELECT 
+	d.stock_mst_id, 
+    d.stock_dtl_id, 
+    d.model_id,
+    d.product_category_id, 
+    d.supplier_id,
+    d.quantity,
+    d.price, m.entry_date,
+    d.org_code,
+    d.br_code
+FROM 
+    stock_dtl d
+JOIN 
+    stock_mst m ON d.stock_mst_id = m.stock_mst_id
+    group by d.model_id
+
+
+
+
+SELECT 
+    m.sales_mst_id, 
+    d.sales_dtl_id, 
+    d.model_id, 
+    d.product_category_id, 
+    d.supplier_id, 
+    d.quantity, 
+    m.entry_date, 
+    d.org_code, 
+    d.br_code
+FROM 
+    sales_dtl d
+JOIN 
+    sales_mst m ON d.sales_mst_id = m.sales_mst_id;
+
+
+view------
+SELECT  
+    sup.supplier_id,  
+    sup.supplier_name,
+    pc.product_category_id,  
+    pc.product_category_name AS product_category_name, 
+    d.entry_date stock_date,
+    pm.model_id,
+    pm.model_name AS model,
+    d.price AS stock_price,       -- Original stock price
+    d.commission_type,
+    d.commission_pct,
+    -- Adjusted buying price considering commission
+    CASE 
+        WHEN d.commission_type = 'PCT' THEN d.price - (d.price * d.commission_pct / 100)
+        WHEN d.commission_type = 'AMT' THEN d.price - d.commission_pct
+        ELSE d.price
+    END AS buying_price,
+pm.price as current_price,
+    d.stock_mst_id,
+    d.stock_dtl_id,
+    d.quantity AS stock,
+    COALESCE(SUM(s.quantity), 0) AS sold,
+    CASE 
+        WHEN COALESCE(SUM(s.quantity), 0) > 0 THEN d.quantity - SUM(s.quantity)
+        ELSE CASE WHEN smst.authorized_status = 'Y' THEN d.quantity ELSE 0 END
+    END AS remaining,
+    d.br_code,
+    d.org_code
+FROM stock_dtl d
+INNER JOIN product_model pm
+    ON pm.model_id = d.model_id
+INNER JOIN stock_mst smst
+    ON d.stock_mst_id = smst.stock_mst_id
+   AND d.br_code = smst.br_code
+INNER JOIN supplier sup
+    ON sup.supplier_id = d.supplier_id
+INNER JOIN product_category pc
+    ON pc.product_category_id = d.product_category_id
+LEFT JOIN sales_dtl s
+    ON s.model_id = d.model_id
+   AND s.product_category_id = d.product_category_id
+   AND s.supplier_id = d.supplier_id
+   AND s.stock_mst_id = d.stock_mst_id
+   AND s.stock_dtl_id = d.stock_dtl_id
+LEFT JOIN sales_mst sm
+    ON s.sales_mst_id = sm.sales_mst_id
+   AND s.br_code = sm.br_code
+   AND sm.authorized_status = 'Y'
+WHERE d.quantity > 0
+GROUP BY 
+    sup.supplier_id,
+    sup.supplier_name,
+    pc.product_category_id,
+    pc.product_category_name,
+    d.entry_date,
+    pm.model_id,
+    pm.model_name,
+    d.price,
+    d.commission_pct,
+    d.commission_type,
+    d.stock_mst_id,
+    d.stock_dtl_id,
+    d.quantity,
+    smst.authorized_status
+HAVING remaining > 0
+ORDER BY pm.model_name;
+
+-----------------stock view-----------report-----------
+SELECT 
+    a.stock_mst_id AS stock_id,
+    DATE(a.stock_date) AS stock_date,
+    a.model,
+    a.product_category_name AS product,
+    a.supplier_name AS brand,
+	a.remaining AS in_stock,
+    b.PRICE AS current_price,
+    a.price AS price_stock_entry,
+        a.commission_type,
+    a.commission_pct,
+    a.buying_price,
+    b.price * a.remaining AS total_stock_value_current,
+    a.buying_price * a.remaining AS total_stock_value_original
+
